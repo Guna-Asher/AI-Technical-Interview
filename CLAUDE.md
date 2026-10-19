@@ -4,7 +4,7 @@
 
 Build an AI-powered, role-based technical interview application.
 
-Candidates upload their resumes, select a job role, answer personalized technical interview questions, and receive a final interview report.
+Candidates upload their resumes, enter a job role, answer personalized technical interview questions, and receive a final interview report.
 
 Questions must be generated using the candidate's resume, selected role, and relevant information retrieved from a technical knowledge base using Retrieval-Augmented Generation (RAG).
 
@@ -117,7 +117,7 @@ Knowledge ingestion must be a separate, repeatable operation. Do not re-ingest d
 
 Use the technical books specified in the internship assignment as the primary knowledge sources. Do not pretend a source covers topics it does not actually address.
 
-Keep the number of supported roles and knowledge sources manageable until the core workflow works.
+Keep the number of knowledge sources manageable until the core workflow works. Roles are entered by the user and are not limited to a predefined list.
 
 ## 7. OpenRouter Integration
 
@@ -180,7 +180,7 @@ Preserve existing working functionality when making changes.
 The required end-to-end workflow is the priority:
 
 1. Upload a resume.
-2. Select a supported interview role.
+2. Enter the interview role.
 3. Extract relevant candidate information.
 4. Retrieve relevant technical knowledge.
 5. Generate contextual interview questions.
@@ -195,3 +195,11 @@ Authentication, voice interviews, advanced analytics, adaptive interviewing, and
 The project is successful when a candidate can complete the interview workflow from resume upload to final report, questions are meaningfully grounded in retrieved knowledge, application data persists correctly, and the entire application can be run through Docker Compose using the documented instructions.
 
 **Working functionality first. Clean engineering throughout. Additional complexity only when it solves a real problem.**
+
+## 12. Dynamic Behaviour
+
+Interview content and workflow must be generated at runtime from real inputs: the role and resume-derived profile supplied by the candidate, passages retrieved at runtime from the indexed knowledge base, and responses from the configured OpenRouter model. Answer evaluation and reports must be derived from the candidate's actual responses.
+
+The application must not ship or fall back to hardcoded job-role lists, predefined questions, canned answers, fixed evaluations, fabricated reports, or hardcoded retrieval results, and must not restrict interviews to a predefined set of roles. A role is validated as user input only. Knowledge coverage for a role is determined by actual retrieval results, and insufficient coverage must be reported honestly.
+
+Structural rules (database schema, constraints, status values, input validation) and configuration (environment variables, model identifier, question count, chunking parameters) are allowed; they are not interview content. Test fixtures may use synthetic values, but these must never become default runtime content.

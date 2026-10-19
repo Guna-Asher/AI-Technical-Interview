@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import health
+from app.api import health, interviews
 from app.config import get_settings
 
 settings = get_settings()
@@ -16,3 +16,4 @@ app.add_middleware(
 )
 
 app.include_router(health.router, prefix="/api")
+app.include_router(interviews.router, prefix="/api")
