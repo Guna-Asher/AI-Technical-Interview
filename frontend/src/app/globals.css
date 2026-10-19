@@ -1,1 +1,93 @@
 @import "tailwindcss";
+
+/* Design tokens. Components use these names, not raw colours. */
+@theme {
+  --color-mist: #f6f7f9; /* page background */
+  --color-paper: #ffffff; /* reading panels and inputs */
+  --color-ink: #151a22; /* primary text */
+  --color-graphite: #4b5563; /* secondary text */
+  --color-rule: #dce1e8; /* hairlines */
+  --color-edge: #7c8696; /* borders of interactive controls (3:1 on paper) */
+  --color-cobalt: #2447c8; /* the single accent: actions, links, focus, progress */
+  --color-cobalt-deep: #1a36a0;
+  --color-cobalt-tint: #e9eefc;
+  --color-moss: #1e6b46;
+  --color-moss-tint: #e6f3ec;
+  --color-amber: #8a5a00;
+  --color-amber-tint: #fbf1dc;
+  --color-brick: #a3261f;
+  --color-brick-tint: #fbe9e7;
+
+  /* System font stacks: no downloads. Serif is for reading content, sans for everything else. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: ui-serif, "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+
+  --animate-stripe: stripe 1.4s ease-in-out infinite;
+  @keyframes stripe {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(300%);
+    }
+  }
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background-color: var(--color-mist);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+    line-height: 1.25;
+  }
+  p,
+  li {
+    text-wrap: pretty;
+  }
+  /* Long words, URLs and code-like strings must never force horizontal scrolling. */
+  main {
+    overflow-wrap: anywhere;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-cobalt);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background-color: var(--color-cobalt-tint);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .avoid-break {
+    break-inside: avoid;
+  }
+}

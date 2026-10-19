@@ -1,15 +1,29 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import AppShell from "@/components/AppShell";
+import { APP_DESCRIPTION, APP_NAME } from "@/lib/brand";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AI Technical Interview",
-  description: "Resume-aware, role-based technical interview practice.",
+  title: { default: APP_NAME, template: `%s · ${APP_NAME}` },
+  description: APP_DESCRIPTION,
+  applicationName: APP_NAME,
+  openGraph: { title: APP_NAME, description: APP_DESCRIPTION, type: "website" },
 };
+
+export const viewport: Viewport = { themeColor: "#f6f7f9" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-slate-50 text-slate-900 antialiased">{children}</body>
+      <body>
+        <a
+          href="#main"
+          className="sr-only rounded-md bg-paper px-4 py-2 font-medium focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50"
+        >
+          Skip to content
+        </a>
+        <AppShell>{children}</AppShell>
+      </body>
     </html>
   );
 }

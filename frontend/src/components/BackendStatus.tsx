@@ -16,20 +16,17 @@ export default function BackendStatus() {
   }, []);
 
   const label = {
-    checking: "Checking backend…",
-    connected: "Backend connected (database OK)",
-    unreachable: "Backend unreachable",
+    checking: "Checking the service…",
+    connected: "Service connected",
+    unreachable: "The service is unreachable. Check that the backend is running.",
   }[status];
 
-  const dot = {
-    checking: "bg-slate-400",
-    connected: "bg-green-500",
-    unreachable: "bg-red-500",
-  }[status];
+  const dot = { checking: "bg-edge", connected: "bg-moss", unreachable: "bg-brick" }[status];
+  const text = status === "unreachable" ? "font-medium text-brick" : "text-graphite";
 
   return (
-    <div className="flex items-center gap-2 text-sm" role="status">
-      <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
+    <div className={`flex items-center gap-2 text-sm ${text}`} role="status">
+      <span aria-hidden="true" className={`size-2 rounded-full ${dot}`} />
       {label}
     </div>
   );
