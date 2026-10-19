@@ -31,6 +31,20 @@ describe("loading and error states", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Interview session not found");
     expect(screen.getByRole("link", { name: "Start a new interview" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull(); // retrying cannot help a 404
+  });
+
+  it("offers Retry for a server error but not for a malformed interview id", async () => {
+    backend.seed().failNext("GET /api/interviews/session-1/questions", 500, "The server failed.");
+    const first = renderView();
+    expect(await screen.findByRole("alert")).toHaveTextContent("The server failed.");
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    first.unmount();
+
+    backend.seed().failNext("GET /api/interviews/session-1", 422, "session_id: Input should be a valid UUID");
+    renderView();
+    expect(await screen.findByText("This interview link is not valid")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
   it("explains a network failure and lets the candidate retry", async () => {
@@ -448,5 +462,47 @@ describe("finishing the interview and the results", () => {
 
     expect(await screen.findByRole("button", FINISH)).toBeInTheDocument();
     expect(screen.queryByText("EARLY-FEEDBACK")).toBeNull(); // results appear only in the report
+  });
+});
+
+describe("answer form keyboard and progress indicator", () => {
+  it.each([["{Control>}{Enter}{/Control}"], ["{Meta>}{Enter}{/Meta}"]])("submits once with %s", async (keys) => {
+    const user = userEvent.setup();
+    backend.seed({}, [makeQuestion(1), makeQuestion(2)]);
+    renderView();
+    await user.type(await screen.findByLabelText("Your answer"), "typed with the keyboard");
+
+    await user.keyboard(keys);
+
+    expect(await screen.findByText("Submitted")).toBeInTheDocument();
+    expect(backend.calls.filter((c) => c.path.endsWith("/answer"))).toHaveLength(1);
+  });
+
+  it("a plain Enter adds a line break instead of submitting", async () => {
+    const user = userEvent.setup();
+    backend.seed({}, [makeQuestion(1)]);
+    renderView();
+    await user.type(await screen.findByLabelText("Your answer"), "line one{Enter}line two");
+
+    expect(screen.getByLabelText("Your answer")).toHaveValue("line one\nline two");
+    expect(backend.calls.filter((c) => c.path.endsWith("/answer"))).toHaveLength(0);
+  });
+
+  it("draws one progress segment per question and keeps the progressbar values", async () => {
+    const q1 = makeQuestion(1);
+    backend.seed({}, [{ ...q1, answer: makeAnswer(q1, "a1") }, makeQuestion(2), makeQuestion(3), makeQuestion(4)]);
+    renderView();
+
+    const bar = await screen.findByRole("progressbar");
+
+    expect(bar.children).toHaveLength(4);
+    expect([bar.getAttribute("aria-valuenow"), bar.getAttribute("aria-valuemax")]).toEqual(["1", "4"]);
+  });
+
+  it("states the answer's save status in plain words next to the submit button", async () => {
+    backend.seed({}, [makeQuestion(1)]);
+    renderView();
+
+    expect(await screen.findByText(/Saved as soon as you submit/)).toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import type { Question, Report } from "@/lib/types";
 import { REPORT_CONTENT, makeAnswer, makeFeedback, makeQuestion } from "@/test-utils/fakeBackend";
@@ -107,5 +108,36 @@ describe("ReportView", () => {
     render(<ReportView report={report()} />);
 
     expect(screen.getByRole("link", { name: "Start a new interview" })).toHaveAttribute("href", "/");
+  });
+});
+
+describe("ReportView long answers", () => {
+  const longText = "A long synthetic answer sentence. ".repeat(30); // over 600 characters
+
+  it("clamps a long answer behind a toggle, keeping the full text on the page", async () => {
+    const user = userEvent.setup();
+    const q = makeQuestion(1);
+    render(<ReportView report={report({ questions: [{ ...q, answer: makeAnswer(q, longText, makeFeedback()) }] })} />);
+
+    const toggle = screen.getByRole("button", { name: "Show full answer" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText(longText.trim())).toBeInTheDocument(); // the full text is in the page, only visually clamped
+
+    await user.click(toggle);
+
+    expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows no toggle for a short answer", () => {
+    render(<ReportView report={report()} />);
+
+    expect(screen.queryByRole("button", { name: /Show (full answer|less)/ })).toBeNull();
+  });
+
+  it("gives each feedback list a heading and keeps one assessment chip per answered question", () => {
+    render(<ReportView report={report()} />);
+
+    expect(screen.getAllByRole("heading", { name: "Done well" })).toHaveLength(2);
+    expect(screen.getAllByText("Mostly correct")).toHaveLength(2);
   });
 });

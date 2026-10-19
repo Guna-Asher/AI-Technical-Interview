@@ -3,14 +3,19 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import AnswerForm from "@/components/AnswerForm";
+import { IconBook, IconCheck } from "@/components/icons";
 import ProgressBar from "@/components/ProgressBar";
 import ReportView from "@/components/ReportView";
+import Alert from "@/components/ui/Alert";
+import Button from "@/components/ui/Button";
+import { ProgressStripe, Spinner } from "@/components/ui/Spinner";
+import Tag from "@/components/ui/Tag";
 import { ApiError, completeInterview, generateQuestions, getInterview, getReport, listQuestions } from "@/lib/api";
 import type { Answer, Interview, Question, Report } from "@/lib/types";
 
 type State =
   | { status: "loading" }
-  | { status: "error"; message: string }
+  | { status: "error"; message: string; httpStatus: number }
   | { status: "ready"; interview: Interview; questions: Question[]; report: Report | null; reportError: string | null };
 
 // The backend is the source of truth: this always reads the saved interview and its questions
@@ -27,31 +32,27 @@ async function fetchState(sessionId: string): Promise<State> {
       return { status: "ready", interview, questions, report: null, reportError };
     }
   } catch (err) {
-    return { status: "error", message: err instanceof ApiError ? err.message : "The interview could not be loaded." };
+    if (err instanceof ApiError) return { status: "error", message: err.message, httpStatus: err.status };
+    return { status: "error", message: "The interview could not be loaded.", httpStatus: 0 };
   }
+}
+
+const LINK = "text-cobalt underline underline-offset-4 hover:text-cobalt-deep";
+
+function errorTitle(httpStatus: number): string {
+  if (httpStatus === 404) return "We could not find this interview";
+  if (httpStatus === 422) return "This interview link is not valid";
+  if (httpStatus === 0) return "The service cannot be reached";
+  return "The interview could not be loaded";
 }
 
 function Sources({ question }: { question: Question }) {
   if (question.source_chunks.length === 0) return null;
   return (
-    <p className="text-xs text-slate-500">
-      Based on:{" "}
-      {question.source_chunks.map((s) => `${s.source_title}, page ${s.page}`).join("; ")}
+    <p className="flex items-start gap-2 text-sm text-graphite">
+      <IconBook className="mt-0.5 size-4" />
+      <span>{`Based on: ${question.source_chunks.map((s) => `${s.source_title}, page ${s.page}`).join("; ")}`}</span>
     </p>
-  );
-}
-
-function QuestionHeading({ question, total }: { question: Question; total: number }) {
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="text-xs uppercase tracking-wide text-slate-500">
-        Question {question.position} of {total}
-        {question.topic ? ` · ${question.topic}` : ""}
-        {question.difficulty ? ` · ${question.difficulty}` : ""}
-      </p>
-      <p className="whitespace-pre-wrap font-medium">{question.question_text}</p>
-      <Sources question={question} />
-    </div>
   );
 }
 
@@ -75,6 +76,11 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   async function reload() {
     setState(await fetchState(sessionId));
+  }
+
+  function retryLoading() {
+    setState({ status: "loading" });
+    void reload();
   }
 
   // Questions are only ever generated from this explicit action, never from an effect or a render.
@@ -140,27 +146,25 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   }
 
   if (state.status === "loading") {
-    return <p role="status">Loading your interview…</p>;
+    return (
+      <div role="status" className="flex items-center gap-3 text-graphite">
+        <Spinner />
+        <span>Loading your interview…</span>
+      </div>
+    );
   }
 
   if (state.status === "error") {
+    const canRetry = state.httpStatus === 0 || state.httpStatus >= 500;
     return (
-      <div className="flex flex-col items-start gap-3">
-        <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-red-800">
+      <div className="flex flex-col items-start gap-5">
+        <h1 className="text-2xl font-semibold">{errorTitle(state.httpStatus)}</h1>
+        <Alert tone="error" className="w-full">
           {state.message}
-        </p>
-        <div className="flex gap-4 text-sm">
-          <button
-            type="button"
-            className="rounded-md bg-slate-900 px-3 py-1.5 text-white"
-            onClick={() => {
-              setState({ status: "loading" });
-              void reload();
-            }}
-          >
-            Retry
-          </button>
-          <Link href="/" className="self-center underline">
+        </Alert>
+        <div className="flex flex-wrap items-center gap-4">
+          {canRetry && <Button onClick={retryLoading}>Retry</Button>}
+          <Link href="/" className={LINK}>
             Start a new interview
           </Link>
         </div>
@@ -174,31 +178,23 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   if (interview.status === "completed") {
     return (
-      <div className="flex flex-col items-start gap-3">
-        <h1 className="text-2xl font-semibold">Interview</h1>
-        <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-red-800">
+      <div className="flex flex-col items-start gap-5">
+        <h1 className="text-2xl font-semibold">The report could not be loaded</h1>
+        <Alert tone="error" className="w-full">
           {state.reportError ?? "The report could not be loaded."}
-        </p>
-        <button
-          type="button"
-          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
-          onClick={() => {
-            setState({ status: "loading" });
-            void reload();
-          }}
-        >
-          Retry
-        </button>
+        </Alert>
+        <Button onClick={retryLoading}>Retry</Button>
       </div>
     );
   }
 
   if (!interview.candidate_profile) {
     return (
-      <div className="flex flex-col gap-3">
-        <h1 className="text-2xl font-semibold">Interview</h1>
+      <div className="flex flex-col items-start gap-4">
+        <h1 className="text-2xl font-semibold">Your interview</h1>
         <p>No resume has been processed for this interview.</p>
-        <Link href="/" className="underline">
+        <p className="text-graphite">Start a new interview and upload your resume to continue.</p>
+        <Link href="/" className={LINK}>
           Start a new interview
         </Link>
       </div>
@@ -207,8 +203,8 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   const header = (
     <div className="flex flex-col gap-1">
-      <h1 className="text-2xl font-semibold">Interview</h1>
-      <p className="text-slate-600">
+      <h1 className="text-2xl font-semibold">Your interview</h1>
+      <p className="text-graphite">
         Role: <span className="whitespace-pre-wrap">{interview.role}</span>
       </p>
     </div>
@@ -217,40 +213,41 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   if (questions.length === 0) {
     const profile = interview.candidate_profile;
     return (
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-8">
         {header}
-        <section className="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4">
-          <h2 className="font-medium">What we read from your resume</h2>
-          {profile.summary && <p className="whitespace-pre-wrap text-sm">{profile.summary}</p>}
-          {profile.technologies.length > 0 && (
-            <p className="text-sm">
-              <span className="font-medium">Technologies:</span> {profile.technologies.join(", ")}
-            </p>
-          )}
-          {profile.skills.length > 0 && (
-            <p className="text-sm">
-              <span className="font-medium">Skills:</span> {profile.skills.join(", ")}
-            </p>
-          )}
+        <section className="flex flex-col gap-4 rounded-xl border border-rule bg-paper p-5 sm:p-7">
+          <h2 className="text-lg font-semibold">What we read from your resume</h2>
+          {profile.summary && <p className="whitespace-pre-wrap font-serif text-[1.0625rem] leading-[1.7]">{profile.summary}</p>}
+          <dl className="grid gap-4 sm:grid-cols-[8rem_1fr]">
+            {profile.technologies.length > 0 && (
+              <>
+                <dt className="font-medium">Technologies</dt>
+                <dd className="text-graphite">{profile.technologies.join(", ")}</dd>
+              </>
+            )}
+            {profile.skills.length > 0 && (
+              <>
+                <dt className="font-medium">Skills</dt>
+                <dd className="text-graphite">{profile.skills.join(", ")}</dd>
+              </>
+            )}
+          </dl>
         </section>
-        {generationError && (
-          <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-            {generationError}
-          </p>
-        )}
+        {generationError && <Alert tone="error">{generationError}</Alert>}
         {generating && (
-          <p role="status" className="text-sm text-slate-600">
-            Generating your questions… this can take up to a minute.
-          </p>
+          <div role="status" className="flex flex-col gap-3">
+            <p className="text-graphite">Generating your questions… this can take up to a minute.</p>
+            <ProgressStripe />
+          </div>
         )}
-        <button
-          type="button"
-          onClick={startInterview}
-          disabled={generating}
-          className="self-start rounded-md bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
-        >
-          {generationError ? "Try again" : "Start interview"}
-        </button>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+          <Button onClick={startInterview} disabled={generating} loading={generating} className="w-full sm:w-auto">
+            {generationError ? "Try again" : "Start interview"}
+          </Button>
+          {!generating && !generationError && (
+            <p className="text-sm text-graphite">Questions are written when you start, from your resume and the reference material.</p>
+          )}
+        </div>
       </div>
     );
   }
@@ -261,60 +258,73 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   const submitted = questions.filter((q) => q.answer);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {header}
-      <div className="flex flex-col gap-2">
-        <p className="text-sm text-slate-600">
-          {current ? `Question ${current.position} of ${total}` : `All ${total} questions answered`} · {answered} answered
+      <div className="flex flex-col gap-3">
+        <p className="text-sm font-medium text-graphite">
+          {current ? `Question ${current.position} of ${total} · ${answered} answered` : `All ${total} questions answered`}
         </p>
         <ProgressBar answered={answered} total={total} />
       </div>
 
       {notice && (
-        <p role="status" className="text-sm text-slate-600">
+        <Alert tone="info" role="status">
           {notice}
-        </p>
+        </Alert>
       )}
 
       {!current && (
-        <section className="flex flex-col gap-3 rounded-md border border-green-300 bg-green-50 p-4">
-          <p className="font-medium">All {total} answers are saved.</p>
-          <p className="text-sm text-slate-600">
+        <section className="flex flex-col gap-4 rounded-xl border border-moss/30 bg-moss-tint p-5 sm:p-6">
+          <p className="flex items-center gap-2 font-semibold text-moss">
+            <IconCheck className="size-5" />
+            <span>All {total} answers are saved.</span>
+          </p>
+          <p className="text-graphite">
             Finishing evaluates your answers with the AI model and writes your report. This can take a few minutes.
           </p>
-          {completionError && (
-            <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-              {completionError}
-            </p>
-          )}
+          {completionError && <Alert tone="error">{completionError}</Alert>}
           {completing && (
-            <p role="status" className="text-sm text-slate-600">
-              Evaluating your answers and writing your report… this can take a few minutes. Your answers are already
-              saved.
-            </p>
+            <div role="status" className="flex flex-col gap-3">
+              <p className="text-graphite">
+                Evaluating your answers and writing your report… this can take a few minutes. Your answers are already saved.
+              </p>
+              <ProgressStripe />
+            </div>
           )}
-          <button
-            type="button"
-            onClick={finishInterview}
-            disabled={completing}
-            className="self-start rounded-md bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
-          >
+          <Button onClick={finishInterview} disabled={completing} loading={completing} className="w-full sm:w-auto sm:self-start">
             {completionError ? "Try again" : "Finish interview and get my report"}
-          </button>
+          </Button>
         </section>
       )}
 
-      {submitted.map((q) => (
-        <section key={q.id} className="flex flex-col gap-2 rounded-md border border-slate-200 bg-white p-4">
-          <QuestionHeading question={q} total={total} />
-          <p className="text-xs font-medium text-green-700">Submitted</p>
-          <p className="whitespace-pre-wrap text-sm">{q.answer?.answer_text}</p>
-        </section>
-      ))}
+      {submitted.length > 0 && (
+        <div className="flex flex-col gap-5">
+          {submitted.map((q) => (
+            <section key={q.id} className="flex flex-col gap-3 border-t border-rule pt-5">
+              <div className="flex flex-col items-start gap-2 sm:flex-row sm:justify-between sm:gap-4">
+                <p className="font-serif text-lg leading-snug">{q.question_text}</p>
+                <Tag tone="success" icon={<IconCheck className="size-3.5" />}>
+                  Submitted
+                </Tag>
+              </div>
+              <p className="whitespace-pre-wrap text-graphite">{q.answer?.answer_text}</p>
+            </section>
+          ))}
+        </div>
+      )}
 
       {current && (
-        <section className="flex flex-col gap-4 rounded-md border border-slate-300 bg-white p-4">
-          <QuestionHeading question={current} total={total} />
+        <section className="flex flex-col gap-5 rounded-xl border border-rule bg-paper p-5 shadow-[0_1px_2px_rgb(21_26_34/0.06)] sm:p-7">
+          <div className="flex flex-col gap-4">
+            {(current.topic || current.difficulty) && (
+              <div className="flex flex-wrap gap-2">
+                {current.topic && <Tag tone="accent">{current.topic}</Tag>}
+                {current.difficulty && <Tag>{current.difficulty}</Tag>}
+              </div>
+            )}
+            <h2 className="whitespace-pre-wrap font-serif text-[1.5rem] leading-snug [text-wrap:pretty] sm:text-[1.75rem]">{current.question_text}</h2>
+            <Sources question={current} />
+          </div>
           <AnswerForm
             key={current.id}
             sessionId={sessionId}

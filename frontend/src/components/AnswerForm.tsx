@@ -1,6 +1,8 @@
 "use client";
 
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import Alert from "@/components/ui/Alert";
+import Button from "@/components/ui/Button";
 import { ApiError, submitAnswer } from "@/lib/api";
 import type { Answer, Question } from "@/lib/types";
 
@@ -18,6 +20,7 @@ export default function AnswerForm({ sessionId, question, onSaved, onAlreadyAnsw
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
+  const form = useRef<HTMLFormElement>(null);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -43,31 +46,38 @@ export default function AnswerForm({ sessionId, question, onSaved, onAlreadyAnsw
     }
   }
 
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      form.current?.requestSubmit();
+    }
+  }
+
+  const hintId = `answer-hint-${question.id}`;
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-3" noValidate>
-      <label htmlFor={`answer-${question.id}`} className="text-sm font-medium">
+    <form ref={form} onSubmit={onSubmit} className="flex flex-col gap-3" noValidate>
+      <label htmlFor={`answer-${question.id}`} className="font-medium">
         Your answer
       </label>
       <textarea
         id={`answer-${question.id}`}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        rows={8}
+        onKeyDown={onKeyDown}
+        rows={9}
         disabled={pending}
-        className="rounded-md border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-100"
+        aria-describedby={hintId}
+        className="min-h-48 w-full resize-y rounded-lg border border-edge bg-paper px-3.5 py-3 text-base leading-relaxed disabled:bg-mist disabled:text-graphite"
       />
-      {error && (
-        <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
-          {error}
+      {error && <Alert tone="error">{error}</Alert>}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+        <Button type="submit" disabled={pending} loading={pending} className="w-full sm:w-auto">
+          {pending ? "Saving…" : "Submit answer"}
+        </Button>
+        <p id={hintId} className="text-sm text-graphite">
+          Saved as soon as you submit, and kept if you refresh. Press Ctrl or ⌘ and Enter to submit.
         </p>
-      )}
-      <button
-        type="submit"
-        disabled={pending}
-        className="self-start rounded-md bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
-      >
-        {pending ? "Saving…" : "Submit answer"}
-      </button>
+      </div>
     </form>
   );
 }

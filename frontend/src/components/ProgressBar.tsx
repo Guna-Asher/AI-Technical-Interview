@@ -1,5 +1,5 @@
+/** One segment per question: answered segments are solid, the current one is tinted. */
 export default function ProgressBar({ answered, total }: { answered: number; total: number }) {
-  const percent = total > 0 ? Math.round((answered / total) * 100) : 0;
   return (
     <div
       role="progressbar"
@@ -7,9 +7,16 @@ export default function ProgressBar({ answered, total }: { answered: number; tot
       aria-valuemin={0}
       aria-valuemax={total}
       aria-valuenow={answered}
-      className="h-2 w-full overflow-hidden rounded-full bg-slate-200"
+      className="flex w-full gap-1.5"
     >
-      <div className="h-full bg-slate-900 transition-all" style={{ width: `${percent}%` }} />
+      {Array.from({ length: total }, (_, index) => (
+        <div
+          key={index}
+          className={`h-1.5 flex-1 rounded-full transition-colors ${
+            index < answered ? "bg-cobalt" : index === answered ? "bg-cobalt/35" : "bg-rule"
+          }`}
+        />
+      ))}
     </div>
   );
 }

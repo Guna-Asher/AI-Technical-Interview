@@ -25,6 +25,10 @@ PostgreSQL and Chroma are reachable only inside the Docker network (`postgres:54
 
 `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` are not needed yet (required from the LLM phase).
 
+## Interface and identity
+
+The interface uses one set of design tokens (colours, type, spacing) defined in `frontend/src/app/globals.css`, small shared components in `frontend/src/components/ui/`, and system font stacks (no font downloads). The product name is a single constant in `frontend/src/lib/brand.ts`, and the favicon is `frontend/src/app/icon.svg`. The framework's dev badge and `X-Powered-By` header are switched off in `frontend/next.config.ts`. All interview content shown (roles, questions, answers, feedback, reports) comes from the backend; only labels and layout are predefined. The layout works from phone to desktop widths, shows visible keyboard focus, and respects the reduced-motion setting.
+
 ## Using the app
 
 1. Open http://localhost:3000, type the job role (free text; there is no preset list) and choose a PDF or TXT resume.

@@ -12,7 +12,7 @@ const TONE: Record<Tone, string> = {
 
 export default function Tag({ tone = "neutral", icon, children }: { tone?: Tone; icon?: ReactNode; children: ReactNode }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[0.8125rem] font-medium ${TONE[tone]}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[0.8125rem] font-medium ${TONE[tone]}`}>
       {icon}
       {children}
     </span>

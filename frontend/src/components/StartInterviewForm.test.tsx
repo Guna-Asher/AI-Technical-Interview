@@ -159,3 +159,36 @@ describe("StartInterviewForm", () => {
     ]);
   });
 });
+
+describe("StartInterviewForm: file feedback and field validation", () => {
+  it("shows the chosen file's name and size and lets the candidate remove it", async () => {
+    const user = userEvent.setup();
+    render(<StartInterviewForm />);
+
+    await user.upload(screen.getByLabelText(/Resume/), new File(["x".repeat(2048)], "my-resume.pdf", { type: "application/pdf" }));
+
+    expect(screen.getByText("my-resume.pdf")).toBeInTheDocument();
+    expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove file" }));
+    expect(screen.queryByText("my-resume.pdf")).toBeNull();
+    expect(screen.getByText(/or drop it here/)).toBeInTheDocument();
+  });
+
+  it("marks the empty fields invalid, and clears the mark when the candidate fixes them", async () => {
+    const user = userEvent.setup();
+    render(<StartInterviewForm />);
+
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(screen.getByLabelText("Job role")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText(/Resume/)).toHaveAttribute("aria-invalid", "true");
+    await user.type(screen.getByLabelText("Job role"), "any role");
+    expect(screen.getByLabelText("Job role")).not.toHaveAttribute("aria-invalid");
+  });
+
+  it("explains what the resume text is used for", () => {
+    render(<StartInterviewForm />);
+
+    expect(screen.getByText(/sent to the AI model.*not stored/)).toBeInTheDocument();
+  });
+});
