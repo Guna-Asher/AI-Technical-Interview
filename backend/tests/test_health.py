@@ -73,3 +73,22 @@ def test_invalid_rag_settings_are_rejected(monkeypatch: pytest.MonkeyPatch, size
 
     with pytest.raises(ValueError):
         Settings()
+
+
+def test_phase4_settings_defaults_and_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@postgres:5432/db")
+    for name in ("QUESTION_COUNT", "CONTEXT_CHUNKS", "MIN_CONTEXT_CHUNKS", "MAX_RESUME_BYTES"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings()
+
+    assert (settings.question_count, settings.context_chunks, settings.min_context_chunks) == (5, 8, 3)
+    assert settings.openrouter_base_url == "https://openrouter.ai/api/v1"
+
+    monkeypatch.setenv("QUESTION_COUNT", "0")
+    with pytest.raises(ValueError):
+        Settings()
+    monkeypatch.setenv("QUESTION_COUNT", "5")
+    monkeypatch.setenv("MIN_CONTEXT_CHUNKS", "9")
+    with pytest.raises(ValueError):
+        Settings()

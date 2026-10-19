@@ -42,10 +42,13 @@ def _clean(text: str) -> str:
     return text.strip()
 
 
-def extract_document(path: Path) -> ExtractedDocument:
-    """Extract cleaned text per page. Pages without useful text are omitted (scanned PDFs yield none)."""
+def extract_document(source: Path | bytes) -> ExtractedDocument:
+    """Extract cleaned text per page from a PDF file or its raw bytes.
+
+    Pages without useful text are omitted (scanned PDFs yield none).
+    """
     try:
-        doc = pymupdf.open(path)
+        doc = pymupdf.open(stream=source, filetype="pdf") if isinstance(source, bytes) else pymupdf.open(source)
     except Exception as exc:
         raise UnreadableDocument(f"cannot open PDF: {exc}") from exc
     with doc:

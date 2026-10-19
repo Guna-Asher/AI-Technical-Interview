@@ -68,3 +68,14 @@ def test_discovery_is_recursive_and_ignores_other_extensions(tmp_path: Path) -> 
 
 def test_discovery_of_empty_directory_returns_nothing(tmp_path: Path) -> None:
     assert discover_pdfs(tmp_path) == []
+
+
+def test_extraction_from_bytes_matches_extraction_from_path(tmp_path: Path) -> None:
+    pdf = make_pdf(tmp_path / "doc.pdf", ["Text on the first page of this synthetic file.", "Text on the second page."], title="Synthetic")
+
+    assert extract_document(pdf.read_bytes()) == extract_document(pdf)
+
+
+def test_corrupt_bytes_raise_unreadable_document() -> None:
+    with pytest.raises(UnreadableDocument):
+        extract_document(b"not a pdf")

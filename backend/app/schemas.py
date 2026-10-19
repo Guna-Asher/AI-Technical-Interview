@@ -36,3 +36,25 @@ class InterviewRead(BaseModel):
     candidate_profile: CandidateProfile | None
     created_at: datetime
     completed_at: datetime | None
+
+
+class SourceReference(BaseModel):
+    """A knowledge-base chunk that a question is based on, as returned by retrieval."""
+
+    chunk_id: str
+    source_file: str
+    source_title: str
+    page: int
+    score: float
+
+
+class QuestionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    position: int
+    question_text: str
+    topic: str | None
+    difficulty: str | None
+    source_chunks: list[SourceReference]
+    created_at: datetime

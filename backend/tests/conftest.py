@@ -88,3 +88,33 @@ def rag_collection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[
             pass  # never created
         monkeypatch.undo()
         get_settings.cache_clear()
+
+
+# Synthetic passages used only to seed a throwaway test collection.
+SEED_PASSAGES = {
+    "a.pdf": [
+        "Database indexes speed up queries. Query tuning with postgres explain plans reduces latency.",
+        "Caching layers reduce latency. Cache invalidation is hard, and caching improves backend role performance.",
+    ],
+    "b.pdf": [
+        "Threads and locks coordinate concurrent backend work. Query tuning also involves concurrency.",
+        "Tomato seedlings need sunlight and regular watering in the garden.",
+    ],
+}
+
+
+@pytest.fixture
+def seeded_knowledge(rag_collection: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> str:
+    """Ingest synthetic PDFs into the throwaway collection and make retrieval use the deterministic fake embedder."""
+    from app.config import get_settings
+    from app.rag.ingest import ingest_directory
+    from tests.rag_helpers import fake_embed, make_pdf
+
+    monkeypatch.setenv("RETRIEVAL_MIN_SCORE", "0.05")  # the fake embedder's scores are not comparable to the real model's
+    get_settings.cache_clear()
+    monkeypatch.setattr("app.rag.retrieval.embed_texts", fake_embed)
+    directory = tmp_path / "seed"
+    for name, pages in SEED_PASSAGES.items():
+        make_pdf(directory / name, pages)
+    ingest_directory(directory, collection_name=rag_collection, embedder=fake_embed, model_name="fake")
+    return rag_collection

@@ -27,9 +27,23 @@ class Settings(BaseSettings):
     # a ranking signal, not a probability or a reliable confidence measure.
     retrieval_min_score: float = 0.25
 
-    # Not used until the LLM phase; optional so the app starts without them.
+    # OpenRouter. Key and model are optional so the app starts without them; LLM operations
+    # raise a clear configuration error when they are missing.
     openrouter_api_key: str | None = None
     openrouter_model: str | None = None
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_timeout_seconds: float = 60.0
+    llm_max_attempts: int = 2  # one retry when the model returns invalid output
+
+    # Resume upload limits.
+    max_resume_bytes: int = 5 * 1024 * 1024
+    max_resume_chars: int = 20_000  # text beyond this is not sent to the model
+
+    # Question generation (operational limits; uncalibrated heuristics, not interview content).
+    question_count: int = 5
+    context_chunks: int = 8  # retrieved passages passed to the model
+    min_context_chunks: int = 3  # fewer relevant passages than this means no questions are generated
+    max_retrieval_queries: int = 4
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -46,6 +60,21 @@ class Settings(BaseSettings):
             raise ValueError("CHUNK_OVERLAP must be at least 0 and less than CHUNK_SIZE")
         if self.retrieval_top_k <= 0:
             raise ValueError("RETRIEVAL_TOP_K must be greater than 0")
+        positive = {
+            "OPENROUTER_TIMEOUT_SECONDS": self.openrouter_timeout_seconds,
+            "LLM_MAX_ATTEMPTS": self.llm_max_attempts,
+            "MAX_RESUME_BYTES": self.max_resume_bytes,
+            "MAX_RESUME_CHARS": self.max_resume_chars,
+            "QUESTION_COUNT": self.question_count,
+            "CONTEXT_CHUNKS": self.context_chunks,
+            "MIN_CONTEXT_CHUNKS": self.min_context_chunks,
+            "MAX_RETRIEVAL_QUERIES": self.max_retrieval_queries,
+        }
+        for name, value in positive.items():
+            if value <= 0:
+                raise ValueError(f"{name} must be greater than 0")
+        if self.min_context_chunks > self.context_chunks:
+            raise ValueError("MIN_CONTEXT_CHUNKS must not exceed CONTEXT_CHUNKS")
         return self
 
     @field_validator("openrouter_api_key", "openrouter_model", mode="before")
