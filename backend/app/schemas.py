@@ -48,6 +48,26 @@ class SourceReference(BaseModel):
     score: float
 
 
+MAX_ANSWER_CHARS = 10_000  # structural limit on a single answer
+
+
+class AnswerCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer_text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_ANSWER_CHARS)]
+
+
+class AnswerRead(BaseModel):
+    """A saved answer. The evaluation (`feedback`) is not exposed."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    question_id: uuid.UUID
+    answer_text: str
+    created_at: datetime
+
+
 class QuestionRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -58,3 +78,4 @@ class QuestionRead(BaseModel):
     difficulty: str | None
     source_chunks: list[SourceReference]
     created_at: datetime
+    answer: AnswerRead | None = None  # null until the candidate has answered

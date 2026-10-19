@@ -3,11 +3,11 @@ import uuid
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import InterviewQuestion, InterviewSession, InterviewStatus
+from app.models import CandidateAnswer, InterviewQuestion, InterviewSession, InterviewStatus
 from app.openrouter import (
     LLMBadResponse,
     LLMError,
@@ -21,7 +21,7 @@ from app.openrouter import (
 from app.question_generation import NoRelevantKnowledge, gather_context, generate_questions
 from app.rag.store import KnowledgeBaseError
 from app.resume import ResumeError, extract_profile, extract_resume_text
-from app.schemas import CandidateProfile, InterviewCreate, InterviewRead, QuestionRead
+from app.schemas import AnswerCreate, AnswerRead, CandidateProfile, InterviewCreate, InterviewRead, QuestionRead
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
@@ -47,6 +47,23 @@ def _get_session_or_404(db: Session, session_id: uuid.UUID) -> InterviewSession:
 
 def _question_count(db: Session, session_id: uuid.UUID) -> int:
     return db.scalar(select(func.count()).select_from(InterviewQuestion).where(InterviewQuestion.session_id == session_id)) or 0
+
+
+def _load_questions(db: Session, session_id: uuid.UUID) -> list[InterviewQuestion]:
+    """A session's questions in order, each with its saved answer (if any), in two queries."""
+    return list(
+        db.scalars(
+            select(InterviewQuestion)
+            .where(InterviewQuestion.session_id == session_id)
+            .options(selectinload(InterviewQuestion.answer))
+            .order_by(InterviewQuestion.position)
+            .execution_options(populate_existing=True)
+        )
+    )
+
+
+def _existing_answer(db: Session, question_id: uuid.UUID) -> uuid.UUID | None:
+    return db.scalar(select(CandidateAnswer.id).where(CandidateAnswer.question_id == question_id))
 
 
 def _lock_session(db: Session, session_id: uuid.UUID) -> InterviewSession:
@@ -163,14 +180,39 @@ def generate_interview_questions(
     except IntegrityError as exc:  # a concurrent request got there first (unique session_id + position)
         db.rollback()
         raise conflict from exc
-    for row in rows:
-        db.refresh(row)
-    return rows
+    return _load_questions(db, session_id)
 
 
 @router.get("/{session_id}/questions", response_model=list[QuestionRead])
 def list_interview_questions(session_id: uuid.UUID, db: Session = Depends(get_db)) -> list[InterviewQuestion]:
+    """The session's questions in order, each with its saved answer or `null`. Used to recover progress."""
     _get_session_or_404(db, session_id)
-    return list(
-        db.scalars(select(InterviewQuestion).where(InterviewQuestion.session_id == session_id).order_by(InterviewQuestion.position))
-    )
+    return _load_questions(db, session_id)
+
+
+@router.post(
+    "/{session_id}/questions/{question_id}/answer",
+    response_model=AnswerRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def submit_answer(
+    session_id: uuid.UUID, question_id: uuid.UUID, payload: AnswerCreate, db: Session = Depends(get_db)
+) -> CandidateAnswer:
+    """Save the candidate's answer to one question. Answers are write-once; a second submission is a 409."""
+    _get_session_or_404(db, session_id)
+    question = db.get(InterviewQuestion, question_id)
+    if question is None or question.session_id != session_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Question not found in this interview")
+    already_answered = HTTPException(status.HTTP_409_CONFLICT, detail="This question has already been answered")
+    if _existing_answer(db, question_id) is not None:
+        raise already_answered
+
+    answer = CandidateAnswer(question_id=question_id, answer_text=payload.answer_text)
+    db.add(answer)
+    try:
+        db.commit()
+    except IntegrityError as exc:  # a concurrent request saved an answer first (unique question_id)
+        db.rollback()
+        raise already_answered from exc
+    db.refresh(answer)
+    return answer

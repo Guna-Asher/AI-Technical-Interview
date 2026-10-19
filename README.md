@@ -2,7 +2,7 @@
 
 A role-based technical interview app: upload a resume, pick a role, answer questions grounded in a technical knowledge base (RAG), and get a final report. See `docs/PRD.md` for requirements.
 
-**Status: Phase 4 (resume processing and question generation).** The four services run, the database schema is managed by Alembic, technical PDFs can be ingested into Chroma and searched, and the API can turn a resume into a candidate profile and generate interview questions grounded in retrieved passages. Answering questions, reports and the interview UI come in later phases.
+**Status: Phase 5 (interview UI and answers).** The four services run, technical PDFs can be ingested into Chroma, and a candidate can enter a role, upload a resume, start the interview, and answer the generated questions in the browser. Answers are saved in PostgreSQL and survive a refresh. AI evaluation of answers and the final report come in a later phase.
 
 ## Run
 
@@ -24,6 +24,18 @@ The backend applies database migrations (`alembic upgrade head`) automatically o
 PostgreSQL and Chroma are reachable only inside the Docker network (`postgres:5432`, `chroma:8000`). Their data lives in the named volumes `postgres_data` and `chroma_data`; `docker compose down` keeps it, `docker compose down -v` deletes it.
 
 `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` are not needed yet (required from the LLM phase).
+
+## Using the app
+
+1. Open http://localhost:3000, type the job role (free text; there is no preset list) and choose a PDF or TXT resume.
+2. After the resume is processed you land on `/interview/<session id>`. Press **Start interview** to generate the questions (once per interview).
+3. Answer the questions one at a time. Each answer is saved by the backend before it is shown as submitted.
+
+Progress is stored by the backend, not the browser. **Refreshing the page, or reopening the same `/interview/<session id>` address, restores your saved answers and continues at the first unanswered question.** Bookmark that address; there is no login, so the address is the way back to an interview.
+
+Answer API: `POST /api/interviews/{session_id}/questions/{question_id}/answer` with `{"answer_text": "..."}` returns 201. It returns 404 if the session or question does not exist (or the question belongs to another session), 409 if the question was already answered (answers are never overwritten), and 422 for a blank, over-long (10,000 characters) or malformed body. `GET /api/interviews/{session_id}/questions` includes each question's saved `answer` (or `null`).
+
+This needs `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and an ingested knowledge base (see below); without them the UI shows the backend's explanation (for example that the key is missing or the knowledge base is empty). **The full flow with a live model and real books has not been verified yet; it is covered by automated tests with mocked responses.**
 
 ## Knowledge base (RAG)
 
@@ -84,6 +96,8 @@ The frontend (Next.js dev server) and backend (`uvicorn --reload`) mount their s
 ```bash
 docker compose run --rm backend pytest -q                   # default suite: no network, no model download (uses a separate <db>_test database)
 docker compose run --rm backend pytest -q -m real_model     # separate smoke test of the real embedding model (needs network on first run)
+docker compose run --rm --no-deps frontend npm test                    # frontend unit and component tests (mocked backend)
+docker compose run --rm frontend npm run test:integration            # frontend client vs the running backend (read-only; needs the stack up)
 docker compose run --rm frontend npm run lint               # frontend lint
 docker compose run --rm frontend npm run typecheck          # frontend types
 docker compose run --rm frontend npm run build              # frontend production build check
