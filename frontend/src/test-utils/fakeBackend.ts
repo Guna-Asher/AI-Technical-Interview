@@ -1,6 +1,6 @@
 // An in-memory stand-in for the FastAPI backend, used only by component tests (never by the app).
 // It follows the real endpoints' status codes and response shapes; all data is synthetic.
-import type { Answer, CandidateProfile, Interview, Question } from "@/lib/types";
+import type { Answer, AnswerFeedback, CandidateProfile, Interview, Question, Report } from "@/lib/types";
 
 export interface Call {
   method: string;
@@ -29,9 +29,29 @@ export function makeQuestion(n: number, overrides: Partial<Question> = {}): Ques
   };
 }
 
-export function makeAnswer(question: Question, text: string): Answer {
-  return { id: `a-${question.id}`, question_id: question.id, answer_text: text, created_at: "2026-01-01T00:01:00Z" };
+export function makeFeedback(overrides: Partial<AnswerFeedback> = {}): AnswerFeedback {
+  return {
+    assessment: "mostly_correct",
+    summary: "Synthetic feedback summary.",
+    strengths: ["did well on idea-a"],
+    gaps: ["missed idea-b"],
+    suggestions: ["review idea-b"],
+    grounded: true,
+    source_chunks: [{ chunk_id: "c1", source_file: "book.pdf", source_title: "Synthetic Book 1", page: 11 }],
+    ...overrides,
+  };
 }
+
+export function makeAnswer(question: Question, text: string, feedback: AnswerFeedback | null = null): Answer {
+  return { id: `a-${question.id}`, question_id: question.id, answer_text: text, created_at: "2026-01-01T00:01:00Z", feedback };
+}
+
+export const REPORT_CONTENT = {
+  summary: "Synthetic overall report summary.",
+  strengths: ["report strength one"],
+  improvement_topics: ["report topic one"],
+  recommendations: ["report recommendation one"],
+};
 
 function reply(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -44,6 +64,11 @@ export class FakeBackend {
   toGenerate: Question[] = [];
   /** The profile POST .../resume will save. */
   resumeProfile: CandidateProfile = PROFILE;
+  /** The saved report, once the interview has been completed. */
+  report: Report | null = null;
+  /** What POST .../complete will write as the report text and as each answer's feedback. */
+  reportContent = REPORT_CONTENT;
+  feedbackFor: (question: Question) => AnswerFeedback = (q) => makeFeedback({ summary: `Feedback for question ${q.position}.` });
   calls: Call[] = [];
 
   private oneShot: { match: string; make: () => Response | Error }[] = [];
@@ -106,6 +131,29 @@ export class FakeBackend {
     return this.route(method, path, body);
   };
 
+  private complete(): Response {
+    if (this.report) return reply(this.report);
+    if (!this.questions.length) return reply({ detail: "This interview has no questions yet." }, 409);
+    const unanswered = this.questions.filter((q) => !q.answer).map((q) => q.position);
+    if (unanswered.length) {
+      return reply({ detail: `Answer question(s) ${unanswered.join(", ")} before finishing the interview.` }, 409);
+    }
+    for (const q of this.questions) q.answer!.feedback ??= this.feedbackFor(q);
+    this.interview!.status = "completed";
+    this.interview!.completed_at = "2026-01-01T00:10:00Z";
+    this.report = {
+      session_id: this.interview!.id,
+      role: this.interview!.role,
+      status: "completed",
+      completed_at: this.interview!.completed_at,
+      created_at: "2026-01-01T00:10:00Z",
+      ...this.reportContent,
+      questions: this.questions.map((q) => ({ ...q })),
+      ungrounded_evaluations: this.questions.filter((q) => !q.answer!.feedback!.grounded).length,
+    };
+    return reply(this.report, 201);
+  }
+
   private route(method: string, path: string, body: unknown): Response {
     if (method === "POST" && path === "/api/interviews") {
       this.interview = {
@@ -118,7 +166,7 @@ export class FakeBackend {
       };
       return reply(this.interview, 201);
     }
-    const match = path.match(/^\/api\/interviews\/([^/]+)(?:\/(resume|questions)(?:\/([^/]+)\/answer)?)?$/);
+    const match = path.match(/^\/api\/interviews\/([^/]+)(?:\/(resume|questions|complete|report)(?:\/([^/]+)\/answer)?)?$/);
     if (!match) return reply({ detail: "Not Found" }, 404);
     const [, sessionId, part, questionId] = match;
     if (!this.interview || this.interview.id !== sessionId) return reply({ detail: "Interview session not found" }, 404);
@@ -135,6 +183,10 @@ export class FakeBackend {
       this.interview.status = "in_progress";
       return reply(this.questions, 201);
     }
+    if (part === "report" && method === "GET") {
+      return this.report ? reply(this.report) : reply({ detail: "No report has been generated for this interview yet" }, 404);
+    }
+    if (part === "complete" && method === "POST") return this.complete();
     if (part === "questions" && questionId && method === "POST") {
       const question = this.questions.find((q) => q.id === questionId);
       if (!question) return reply({ detail: "Question not found in this interview" }, 404);

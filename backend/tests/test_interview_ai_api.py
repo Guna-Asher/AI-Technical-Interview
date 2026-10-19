@@ -178,6 +178,30 @@ def test_generation_persists_validated_questions_with_real_source_references(
     assert "Database indexes speed up queries" in prompt  # and from passages retrieved at runtime
 
 
+def test_the_cited_passage_text_is_saved_but_never_returned_by_the_api(
+    api_client: TestClient, db: Session, llm: FakeLLM, seeded_knowledge: str
+) -> None:
+    session_id = create(api_client)
+    llm.replies.append(QUESTIONS)
+
+    post = api_client.post(f"/api/interviews/{session_id}/questions")
+    listing = api_client.get(f"/api/interviews/{session_id}/questions")
+
+    assert post.status_code == 201
+    for response in (post, listing):
+        for q in response.json():
+            assert all("text" not in ref for ref in q["source_chunks"])  # metadata only
+    collection = get_collection(seeded_knowledge)
+    assert collection is not None
+    db.expire_all()
+    saved = db.scalars(select(InterviewQuestion).where(InterviewQuestion.session_id == uuid.UUID(session_id))).all()
+    for row in saved:
+        for ref in row.source_chunks:
+            stored = collection.get(ids=[ref["chunk_id"]], include=["documents"])
+            assert ref["text"] == stored["documents"][0]  # the snapshot equals the retrieved passage
+            assert ref["text"] in llm.prompts[0]  # and it is what the model was shown
+
+
 def test_generating_twice_returns_409_and_adds_nothing(api_client: TestClient, db: Session, llm: FakeLLM, seeded_knowledge: str) -> None:
     session_id = create(api_client)
     llm.replies.append(QUESTIONS)

@@ -1,4 +1,4 @@
-import type { Answer, Interview, Question } from "./types";
+import type { Answer, Interview, Question, Report } from "./types";
 
 /** Browser-facing backend URL (not the Docker hostname). Read at call time so tests can change it. */
 function apiBase(): string {
@@ -80,4 +80,13 @@ export function submitAnswer(sessionId: string, questionId: string, answerText: 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ answer_text: answerText }),
   });
+}
+
+/** Evaluates the saved answers and writes the report. Safe to repeat: finished work is not redone. */
+export function completeInterview(sessionId: string): Promise<Report> {
+  return request(`/api/interviews/${id(sessionId)}/complete`, { method: "POST" });
+}
+
+export function getReport(sessionId: string): Promise<Report> {
+  return request(`/api/interviews/${id(sessionId)}/report`);
 }

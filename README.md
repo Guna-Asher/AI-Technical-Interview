@@ -2,7 +2,7 @@
 
 A role-based technical interview app: upload a resume, pick a role, answer questions grounded in a technical knowledge base (RAG), and get a final report. See `docs/PRD.md` for requirements.
 
-**Status: Phase 5 (interview UI and answers).** The four services run, technical PDFs can be ingested into Chroma, and a candidate can enter a role, upload a resume, start the interview, and answer the generated questions in the browser. Answers are saved in PostgreSQL and survive a refresh. AI evaluation of answers and the final report come in a later phase.
+**Status: Phase 6 (evaluation and final report).** The four services run, technical PDFs can be ingested into Chroma, and a candidate can enter a role, upload a resume, answer the generated questions in the browser, finish the interview, and read a saved report with feedback on every answer. Everything is stored in PostgreSQL and survives a refresh or restart.
 
 ## Run
 
@@ -30,12 +30,25 @@ PostgreSQL and Chroma are reachable only inside the Docker network (`postgres:54
 1. Open http://localhost:3000, type the job role (free text; there is no preset list) and choose a PDF or TXT resume.
 2. After the resume is processed you land on `/interview/<session id>`. Press **Start interview** to generate the questions (once per interview).
 3. Answer the questions one at a time. Each answer is saved by the backend before it is shown as submitted.
+4. When every question is answered, press **Finish interview and get my report**. The backend evaluates each answer with the AI model and then writes the report; this takes several model calls and can take a few minutes. Your answers are already saved while it runs.
+
+The report shows an overall summary, strengths, topics to improve, recommendations, and per-question feedback with the sources each question was based on. **It is AI-generated guidance, not a measurement of ability.**
 
 Progress is stored by the backend, not the browser. **Refreshing the page, or reopening the same `/interview/<session id>` address, restores your saved answers and continues at the first unanswered question.** Bookmark that address; there is no login, so the address is the way back to an interview.
 
 Answer API: `POST /api/interviews/{session_id}/questions/{question_id}/answer` with `{"answer_text": "..."}` returns 201. It returns 404 if the session or question does not exist (or the question belongs to another session), 409 if the question was already answered (answers are never overwritten), and 422 for a blank, over-long (10,000 characters) or malformed body. `GET /api/interviews/{session_id}/questions` includes each question's saved `answer` (or `null`).
 
 This needs `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` and an ingested knowledge base (see below); without them the UI shows the backend's explanation (for example that the key is missing or the knowledge base is empty). **The full flow with a live model and real books has not been verified yet; it is covered by automated tests with mocked responses.**
+
+### Finishing an interview (evaluation and report)
+
+- `POST /api/interviews/{session_id}/complete` evaluates every saved answer that has no feedback yet, then writes and saves the report. It returns `201` with the report, or `200` with the existing report if the interview was already completed. It returns `409` (naming the unanswered questions) if any question has no answer, and `429`/`502`/`503`/`504` for OpenRouter problems.
+- `GET /api/interviews/{session_id}/report` returns the saved report (`404` until one exists).
+- **Safe to retry.** Each evaluation is saved as soon as it is valid, so after a provider error the retry continues with the remaining answers, and if only the report step failed the retry only writes the report. Invalid model output is never saved. Submitted answers are never changed or lost. A repeated request returns the same report and does not create a second one.
+- **Grounding.** When a question is generated, the exact text of each passage it cites is saved with the question. Evaluation judges the answer against those saved passages (never against whatever is in Chroma later), and a grounded evaluation must cite at least one of them. If a question has no saved passage text (for example data saved by an older version), its answer is still evaluated, but clearly labelled as evaluated without reference passages, and the report says how many answers were. The passage text is never returned by the API or shown in the UI; only source title and page are.
+- Feedback is qualitative: a coarse assessment label plus written strengths, gaps and suggestions. There is no numeric score.
+- Answer text, passages and the interview data are passed to the model as delimited data that it is told to treat as reference material, and its output is validated before anything is saved. This reduces but cannot eliminate prompt-injection risk.
+- **Verification status:** this flow is covered by automated tests with mocked model replies and synthetic data. **A live OpenRouter run and real-book content have not been verified** (no API key and no technical PDFs have been supplied), so evaluation quality, the chosen model's JSON compliance, the total processing time and a real-browser walkthrough are untested.
 
 ## Knowledge base (RAG)
 

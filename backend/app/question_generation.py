@@ -137,12 +137,18 @@ class _QuestionItem(BaseModel):
 
 
 def _reference(chunk: RetrievedChunk) -> dict[str, Any]:
+    """The saved record of a cited chunk, taken from the retrieval result.
+
+    `text` is a snapshot of the exact passage the model saw, so later evaluation does not depend on Chroma,
+    where a re-ingested document could have changed. The API exposes only the metadata (see SourceReference).
+    """
     return {
         "chunk_id": chunk.chunk_id,
         "source_file": chunk.source_file,
         "source_title": chunk.source_title,
         "page": chunk.page,
         "score": round(chunk.score, 4),
+        "text": chunk.text,
     }
 
 

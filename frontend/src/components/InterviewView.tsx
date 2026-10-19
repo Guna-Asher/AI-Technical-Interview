@@ -4,20 +4,28 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import AnswerForm from "@/components/AnswerForm";
 import ProgressBar from "@/components/ProgressBar";
-import { ApiError, generateQuestions, getInterview, listQuestions } from "@/lib/api";
-import type { Answer, Interview, Question } from "@/lib/types";
+import ReportView from "@/components/ReportView";
+import { ApiError, completeInterview, generateQuestions, getInterview, getReport, listQuestions } from "@/lib/api";
+import type { Answer, Interview, Question, Report } from "@/lib/types";
 
 type State =
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; interview: Interview; questions: Question[] };
+  | { status: "ready"; interview: Interview; questions: Question[]; report: Report | null; reportError: string | null };
 
 // The backend is the source of truth: this always reads the saved interview and its questions
 // (with any saved answers), so a refresh shows exactly what was stored.
 async function fetchState(sessionId: string): Promise<State> {
   try {
     const [interview, questions] = await Promise.all([getInterview(sessionId), listQuestions(sessionId)]);
-    return { status: "ready", interview, questions };
+    if (interview.status !== "completed") return { status: "ready", interview, questions, report: null, reportError: null };
+    // A completed interview always has a saved report; reading it makes the results survive a refresh.
+    try {
+      return { status: "ready", interview, questions, report: await getReport(sessionId), reportError: null };
+    } catch (err) {
+      const reportError = err instanceof ApiError ? err.message : "The report could not be loaded.";
+      return { status: "ready", interview, questions, report: null, reportError };
+    }
   } catch (err) {
     return { status: "error", message: err instanceof ApiError ? err.message : "The interview could not be loaded." };
   }
@@ -53,6 +61,9 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const generatingRef = useRef(false);
+  const [completing, setCompleting] = useState(false);
+  const [completionError, setCompletionError] = useState<string | null>(null);
+  const completingRef = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -84,6 +95,33 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
     } finally {
       generatingRef.current = false;
       setGenerating(false);
+    }
+  }
+
+  // Evaluation and the report are only ever started from this explicit action, never from an effect or a render.
+  async function finishInterview() {
+    if (completingRef.current) return;
+    completingRef.current = true;
+    setCompleting(true);
+    setCompletionError(null);
+    try {
+      const report = await completeInterview(sessionId);
+      setState((s) =>
+        s.status === "ready"
+          ? {
+              ...s,
+              report,
+              reportError: null,
+              questions: report.questions,
+              interview: { ...s.interview, status: "completed", completed_at: report.completed_at },
+            }
+          : s,
+      );
+    } catch (err) {
+      setCompletionError(err instanceof ApiError ? err.message : "The report could not be created. Please try again.");
+    } finally {
+      completingRef.current = false;
+      setCompleting(false);
     }
   }
 
@@ -131,6 +169,29 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   }
 
   const { interview, questions } = state;
+
+  if (state.report) return <ReportView report={state.report} />;
+
+  if (interview.status === "completed") {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <h1 className="text-2xl font-semibold">Interview</h1>
+        <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-red-800">
+          {state.reportError ?? "The report could not be loaded."}
+        </p>
+        <button
+          type="button"
+          className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white"
+          onClick={() => {
+            setState({ status: "loading" });
+            void reload();
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (!interview.candidate_profile) {
     return (
@@ -216,9 +277,30 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
       )}
 
       {!current && (
-        <section className="rounded-md border border-green-300 bg-green-50 p-4">
+        <section className="flex flex-col gap-3 rounded-md border border-green-300 bg-green-50 p-4">
           <p className="font-medium">All {total} answers are saved.</p>
-          <p className="text-sm text-slate-600">Evaluation and the final report are not available yet.</p>
+          <p className="text-sm text-slate-600">
+            Finishing evaluates your answers with the AI model and writes your report. This can take a few minutes.
+          </p>
+          {completionError && (
+            <p role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800">
+              {completionError}
+            </p>
+          )}
+          {completing && (
+            <p role="status" className="text-sm text-slate-600">
+              Evaluating your answers and writing your report… this can take a few minutes. Your answers are already
+              saved.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={finishInterview}
+            disabled={completing}
+            className="self-start rounded-md bg-slate-900 px-4 py-2 font-medium text-white disabled:opacity-50"
+          >
+            {completionError ? "Try again" : "Finish interview and get my report"}
+          </button>
         </section>
       )}
 

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { FakeBackend, makeAnswer, makeQuestion } from "@/test-utils/fakeBackend";
+import { FakeBackend, REPORT_CONTENT, makeAnswer, makeFeedback, makeQuestion } from "@/test-utils/fakeBackend";
 import InterviewView from "./InterviewView";
 
 // All questions, answers and backend replies here are synthetic test data served by an in-memory fake backend.
@@ -195,7 +195,8 @@ describe("questions and progress", () => {
     renderView();
 
     expect(await screen.findByText("All 3 answers are saved.")).toBeInTheDocument();
-    expect(screen.getByText(/not available yet/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Finish interview and get my report" })).toBeEnabled();
+    expect(screen.queryByText(/not available yet/)).toBeNull();
     expect(screen.getAllByText("Submitted")).toHaveLength(3);
     expect(screen.getByText("saved answer 3")).toBeInTheDocument();
     expect(screen.queryByLabelText("Your answer")).toBeNull();
@@ -313,5 +314,139 @@ describe("submitting answers", () => {
       "/api/interviews/session-1/questions/q2/answer",
       "/api/interviews/session-1/questions/q3/answer",
     ]);
+  });
+});
+
+describe("finishing the interview and the results", () => {
+  const FINISH = { name: "Finish interview and get my report" };
+  const answered = (count = 3) => Array.from({ length: count }, (_, i) => {
+    const q = makeQuestion(i + 1);
+    return { ...q, answer: makeAnswer(q, `saved answer ${i + 1}`) };
+  });
+  const completeCalls = () => backend.calls.filter((c) => c.method === "POST" && c.path.endsWith("/complete")).length;
+  const reportCalls = () => backend.calls.filter((c) => c.method === "GET" && c.path.endsWith("/report")).length;
+
+  it("offers to finish only when every question is answered", async () => {
+    const [q1, q2, q3] = three();
+    backend.seed({}, [{ ...q1, answer: makeAnswer(q1, "a1") }, q2, q3]);
+    const first = renderView();
+    await screen.findByLabelText("Your answer");
+    expect(screen.queryByRole("button", { name: FINISH.name })).toBeNull();
+    first.unmount();
+
+    backend.seed({}, answered());
+    renderView();
+
+    expect(await screen.findByRole("button", { name: FINISH.name })).toBeInTheDocument();
+  });
+
+  it("never starts evaluation or fetches a report on mount, re-render or refresh", async () => {
+    backend.seed({}, answered());
+    const first = renderView();
+    await screen.findByRole("button", { name: FINISH.name });
+
+    first.rerender(<InterviewView sessionId="session-1" />);
+    first.unmount();
+    renderView(); // a browser refresh
+    await screen.findByRole("button", { name: FINISH.name });
+
+    expect(backend.calls.every((c) => c.method === "GET")).toBe(true);
+    expect(completeCalls()).toBe(0);
+    expect(reportCalls()).toBe(0); // an unfinished interview has no report to load
+  });
+
+  it("shows a processing state, sends one request on repeated clicks, then shows the report from the backend", async () => {
+    backend.seed({}, answered());
+    const release = backend.hold("/complete");
+    renderView();
+    const finish = await screen.findByRole("button", FINISH);
+
+    fireEvent.click(finish);
+    fireEvent.click(finish);
+
+    expect(await screen.findByText(/Evaluating your answers and writing your report/)).toBeInTheDocument();
+    expect(screen.getByRole("button", FINISH)).toBeDisabled();
+    expect(screen.getByText("saved answer 2")).toBeInTheDocument(); // saved answers stay visible while processing
+    release();
+
+    expect(await screen.findByRole("heading", { name: "Interview report" })).toBeInTheDocument();
+    expect(completeCalls()).toBe(1);
+    expect(screen.getByText(REPORT_CONTENT.summary)).toBeInTheDocument();
+    expect(screen.getByText("report recommendation one")).toBeInTheDocument();
+    expect(screen.getByText("Feedback for question 2.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", FINISH)).toBeNull();
+  });
+
+  it.each([
+    [409, "Answer question(s) 3 before finishing the interview."],
+    [503, "OPENROUTER_API_KEY is not configured. Set it in .env and restart the backend."],
+    [502, "1 of 3 answers evaluated before the error. Your answers and the finished evaluations are saved; try again to continue."],
+    [429, "OpenRouter rate limit reached. Try again shortly."],
+    [504, "The request to OpenRouter timed out."],
+  ])("shows the backend's message when finishing fails (HTTP %i), keeps the answers, and allows a retry", async (status, detail) => {
+    const user = userEvent.setup();
+    backend.seed({}, answered());
+    backend.failNext("POST /api/interviews/session-1/complete", status, detail);
+    renderView();
+
+    await user.click(await screen.findByRole("button", FINISH));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(detail);
+    expect(screen.getByText("saved answer 1")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Interview report" })).toBeNull();
+    const retry = screen.getByRole("button", { name: "Try again" });
+    expect(retry).toBeEnabled();
+
+    await user.click(retry);
+    expect(await screen.findByRole("heading", { name: "Interview report" })).toBeInTheDocument();
+    expect(completeCalls()).toBe(2);
+  });
+
+  it("explains when the server cannot be reached while finishing", async () => {
+    const user = userEvent.setup();
+    backend.seed({}, answered());
+    backend.networkErrorNext("/complete");
+    renderView();
+
+    await user.click(await screen.findByRole("button", FINISH));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Cannot reach the server");
+  });
+
+  it("loads and shows the saved report after a refresh without calling complete again", async () => {
+    backend.seed({}, answered());
+    await backend.fetch("http://localhost:8000/api/interviews/session-1/complete", { method: "POST" }); // finished earlier
+    backend.calls = [];
+
+    renderView();
+
+    expect(await screen.findByRole("heading", { name: "Interview report" })).toBeInTheDocument();
+    expect(screen.getByText(REPORT_CONTENT.summary)).toBeInTheDocument();
+    expect(screen.getByText("Feedback for question 3.")).toBeInTheDocument();
+    expect(completeCalls()).toBe(0);
+    expect(reportCalls()).toBe(1);
+  });
+
+  it("shows an error with a retry when a completed interview's report cannot be loaded", async () => {
+    const user = userEvent.setup();
+    backend.seed({}, answered());
+    await backend.fetch("http://localhost:8000/api/interviews/session-1/complete", { method: "POST" });
+    backend.failNext("GET /api/interviews/session-1/report", 500, "The report could not be read.");
+    renderView();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("The report could not be read.");
+    expect(screen.queryByRole("button", FINISH)).toBeNull(); // a completed interview is never re-completed
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByRole("heading", { name: "Interview report" })).toBeInTheDocument();
+  });
+
+  it("shows the feedback that is saved with a partly evaluated, unfinished interview only after finishing", async () => {
+    const withFeedback = answered().map((q, i) => (i === 0 ? { ...q, answer: { ...q.answer!, feedback: makeFeedback({ summary: "EARLY-FEEDBACK" }) } } : q));
+    backend.seed({}, withFeedback);
+    renderView();
+
+    expect(await screen.findByRole("button", FINISH)).toBeInTheDocument();
+    expect(screen.queryByText("EARLY-FEEDBACK")).toBeNull(); // results appear only in the report
   });
 });

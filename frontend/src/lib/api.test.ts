@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  completeInterview,
   createInterview,
   generateQuestions,
+  getReport,
   getInterview,
   listQuestions,
   submitAnswer,
@@ -86,6 +88,19 @@ describe("requests", () => {
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual({ answer_text: "my answer" });
     expect(answer.id).toBe("a1");
+  });
+
+  it("completeInterview POSTs to the complete endpoint and getReport GETs the report", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(json({ session_id: "s1" })));
+
+    await completeInterview("s1");
+    await getReport("s1");
+
+    expect(fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"])).toEqual([
+      ["http://api.test/api/interviews/s1/complete", "POST"],
+      ["http://api.test/api/interviews/s1/report", "GET"],
+    ]);
+    expect(fetchMock.mock.calls[0][1].body).toBeUndefined();
   });
 
   it("encodes path parameters", async () => {

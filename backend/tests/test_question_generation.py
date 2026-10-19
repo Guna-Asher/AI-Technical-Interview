@@ -134,8 +134,28 @@ def test_valid_reply_maps_references_to_the_retrieved_chunks() -> None:
         "source_title": "Synthetic Book",
         "page": 1,
         "score": 0.9,
+        "text": "passage text 1",
     }
     assert result[1].source_chunks[0]["page"] == 2
+
+
+def test_the_original_retrieved_text_is_saved_with_each_cited_chunk() -> None:
+    data = {"questions": [question(1, source_refs=[2]), question(2, source_refs=[1, 3])]}
+
+    first, second = validate_questions(data, PASSAGES, count=2)
+
+    assert [c["text"] for c in first.source_chunks] == [PASSAGES[1].text]  # only the cited passage is stored
+    assert [(c["chunk_id"], c["text"]) for c in second.source_chunks] == [(PASSAGES[0].chunk_id, PASSAGES[0].text), (PASSAGES[2].chunk_id, PASSAGES[2].text)]
+    assert all(set(c) == {"chunk_id", "source_file", "source_title", "page", "score", "text"} for c in first.source_chunks)
+
+
+def test_text_supplied_by_the_model_is_never_stored() -> None:
+    forged = question(1, text="FORGED PASSAGE TEXT", source_chunks=[{"chunk_id": "x", "text": "FORGED PASSAGE TEXT"}])
+
+    [result] = validate_questions({"questions": [forged]}, PASSAGES, count=1)
+
+    assert result.source_chunks[0]["text"] == "passage text 1"
+    assert "FORGED" not in str(result)
 
 
 def test_fields_invented_by_the_model_are_ignored() -> None:

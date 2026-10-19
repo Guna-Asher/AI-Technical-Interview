@@ -51,7 +51,8 @@ def test_submitting_an_answer_saves_it(api_client: TestClient, db: Session) -> N
     body = response.json()
     assert body["answer_text"] == "my synthetic answer"
     assert body["question_id"] == q1
-    assert set(body) == {"id", "question_id", "answer_text", "created_at"}  # no feedback exposed
+    assert set(body) == {"id", "question_id", "answer_text", "created_at", "feedback"}
+    assert body["feedback"] is None  # a new answer has not been evaluated yet
     with SessionLocal() as fresh:  # a different connection than the request used
         row = fresh.scalars(select(CandidateAnswer)).one()
         assert (str(row.id), str(row.question_id), row.answer_text, row.feedback) == (body["id"], q1, "my synthetic answer", None)
@@ -149,9 +150,9 @@ def test_the_question_list_reports_which_questions_are_answered(api_client: Test
     assert [q["position"] for q in first] == [1, 2, 3]
     assert [q["id"] for q in first] == [q1, q2, q3]
     assert [q["answer"]["answer_text"] if q["answer"] else None for q in first] == ["answer one", None, "answer three"]
-    assert set(first[0]["answer"]) == {"id", "question_id", "answer_text", "created_at"}
+    assert set(first[0]["answer"]) == {"id", "question_id", "answer_text", "created_at", "feedback"}
     assert first[0]["answer"]["question_id"] == q1
-    assert "feedback" not in str(first)
+    assert all(q["answer"]["feedback"] is None for q in first if q["answer"])  # nothing has been evaluated yet
 
 
 def test_answers_never_leak_between_sessions(api_client: TestClient, db: Session) -> None:

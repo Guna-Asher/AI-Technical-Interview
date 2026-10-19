@@ -1,10 +1,11 @@
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
+from app.completion import IncompleteInterview, build_report_read, complete_interview, get_report, load_questions as _load_questions
 from app.config import get_settings
 from app.database import get_db
 from app.models import CandidateAnswer, InterviewQuestion, InterviewSession, InterviewStatus
@@ -21,7 +22,7 @@ from app.openrouter import (
 from app.question_generation import NoRelevantKnowledge, gather_context, generate_questions
 from app.rag.store import KnowledgeBaseError
 from app.resume import ResumeError, extract_profile, extract_resume_text
-from app.schemas import AnswerCreate, AnswerRead, CandidateProfile, InterviewCreate, InterviewRead, QuestionRead
+from app.schemas import AnswerCreate, AnswerRead, CandidateProfile, InterviewCreate, InterviewRead, QuestionRead, ReportRead
 
 router = APIRouter(prefix="/interviews", tags=["interviews"])
 
@@ -47,19 +48,6 @@ def _get_session_or_404(db: Session, session_id: uuid.UUID) -> InterviewSession:
 
 def _question_count(db: Session, session_id: uuid.UUID) -> int:
     return db.scalar(select(func.count()).select_from(InterviewQuestion).where(InterviewQuestion.session_id == session_id)) or 0
-
-
-def _load_questions(db: Session, session_id: uuid.UUID) -> list[InterviewQuestion]:
-    """A session's questions in order, each with its saved answer (if any), in two queries."""
-    return list(
-        db.scalars(
-            select(InterviewQuestion)
-            .where(InterviewQuestion.session_id == session_id)
-            .options(selectinload(InterviewQuestion.answer))
-            .order_by(InterviewQuestion.position)
-            .execution_options(populate_existing=True)
-        )
-    )
 
 
 def _existing_answer(db: Session, question_id: uuid.UUID) -> uuid.UUID | None:
@@ -216,3 +204,33 @@ def submit_answer(
         raise already_answered from exc
     db.refresh(answer)
     return answer
+
+
+@router.post("/{session_id}/complete", response_model=ReportRead)
+def complete_interview_route(
+    session_id: uuid.UUID,
+    response: Response,
+    db: Session = Depends(get_db),
+    llm: OpenRouterClient = Depends(get_llm),
+) -> ReportRead:
+    """Evaluate the saved answers and write the final report. Safe to repeat: finished work is never redone.
+
+    201 when the report is created, 200 when it already existed.
+    """
+    _get_session_or_404(db, session_id)
+    try:
+        _, created = complete_interview(db, llm, session_id)
+    except IncompleteInterview as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise _llm_http_error(exc) from exc
+    response.status_code = status.HTTP_201_CREATED if created else status.HTTP_200_OK
+    return build_report_read(db, session_id)
+
+
+@router.get("/{session_id}/report", response_model=ReportRead)
+def get_interview_report(session_id: uuid.UUID, db: Session = Depends(get_db)) -> ReportRead:
+    _get_session_or_404(db, session_id)
+    if get_report(db, session_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No report has been generated for this interview yet")
+    return build_report_read(db, session_id)

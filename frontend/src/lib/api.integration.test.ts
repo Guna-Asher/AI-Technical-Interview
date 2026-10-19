@@ -2,7 +2,17 @@
 // It performs NO writes: every call here is rejected by the backend before anything is saved,
 // so it can be run against the development database without leaving rows behind.
 import { beforeAll, describe, expect, it } from "vitest";
-import { ApiError, createInterview, generateQuestions, getInterview, listQuestions, submitAnswer, uploadResume } from "./api";
+import {
+  ApiError,
+  completeInterview,
+  createInterview,
+  generateQuestions,
+  getInterview,
+  getReport,
+  listQuestions,
+  submitAnswer,
+  uploadResume,
+} from "./api";
 
 const base = process.env.INTEGRATION_API_URL;
 const unknownId = "00000000-0000-0000-0000-000000000000";
@@ -33,6 +43,8 @@ describe("real backend", () => {
     ["getInterview", () => getInterview(unknownId)],
     ["listQuestions", () => listQuestions(unknownId)],
     ["generateQuestions", () => generateQuestions(unknownId)],
+    ["completeInterview", () => completeInterview(unknownId)],
+    ["getReport", () => getReport(unknownId)],
     ["uploadResume", () => uploadResume(unknownId, new File(["synthetic resume"], "resume.txt", { type: "text/plain" }))],
   ])("%s reports an unknown session as a readable 404", async (_name, call) => {
     const error = await failure(call);

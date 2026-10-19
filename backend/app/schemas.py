@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
@@ -57,8 +57,33 @@ class AnswerCreate(BaseModel):
     answer_text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_ANSWER_CHARS)]
 
 
+Assessment = Literal["correct_and_complete", "mostly_correct", "partially_correct", "incorrect_or_off_topic"]
+
+
+class FeedbackSource(BaseModel):
+    """A passage that supports an evaluation. Copied from the question's own saved sources, never from the model."""
+
+    chunk_id: str
+    source_file: str
+    source_title: str
+    page: int
+
+
+class AnswerFeedback(BaseModel):
+    """Qualitative, AI-generated feedback on one answer. Guidance only; there is deliberately no numeric score."""
+
+    assessment: Assessment
+    summary: str
+    strengths: list[str]
+    gaps: list[str]
+    suggestions: list[str]
+    # Set by the application: true only when at least one valid reference to a supplied passage was verified.
+    grounded: bool
+    source_chunks: list[FeedbackSource]
+
+
 class AnswerRead(BaseModel):
-    """A saved answer. The evaluation (`feedback`) is not exposed."""
+    """A saved answer, with its evaluation once one exists."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -66,6 +91,7 @@ class AnswerRead(BaseModel):
     question_id: uuid.UUID
     answer_text: str
     created_at: datetime
+    feedback: AnswerFeedback | None = None
 
 
 class QuestionRead(BaseModel):
@@ -79,3 +105,20 @@ class QuestionRead(BaseModel):
     source_chunks: list[SourceReference]
     created_at: datetime
     answer: AnswerRead | None = None  # null until the candidate has answered
+
+
+class ReportRead(BaseModel):
+    """The saved final report with the interview's questions, answers and per-question feedback."""
+
+    session_id: uuid.UUID
+    role: str
+    status: str
+    completed_at: datetime | None
+    created_at: datetime
+    summary: str
+    strengths: list[str]
+    improvement_topics: list[str]
+    recommendations: list[str]
+    questions: list[QuestionRead]
+    # Number of answers evaluated without reference passages (computed from the saved feedback).
+    ungrounded_evaluations: int
