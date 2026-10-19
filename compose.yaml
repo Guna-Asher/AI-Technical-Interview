@@ -36,6 +36,10 @@ services:
 
   backend:
     build: ./backend
+    # Optional: any setting in .env (e.g. CHUNK_SIZE) reaches the backend; defaults live in app/config.py.
+    env_file:
+      - path: .env
+        required: false
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-interview}:${POSTGRES_PASSWORD:-change-me}@postgres:5432/${POSTGRES_DB:-interview}
@@ -48,6 +52,8 @@ services:
       - "8000:8000"
     volumes:
       - ./backend:/app
+      - ${KNOWLEDGE_HOST_DIR:-./knowledge}:/knowledge:ro
+      - hf_cache:/home/appuser/.cache/huggingface
     depends_on:
       postgres:
         condition: service_healthy
@@ -83,3 +89,4 @@ services:
 volumes:
   postgres_data:
   chroma_data:
+  hf_cache:

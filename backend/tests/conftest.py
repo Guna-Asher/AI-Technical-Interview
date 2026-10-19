@@ -58,3 +58,33 @@ def api_client(db: Session) -> Iterator[TestClient]:
 
     with TestClient(app) as client:
         yield client
+
+
+@pytest.fixture
+def rag_collection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[str]:
+    """A throwaway Chroma collection name; settings are pointed at it and at an empty temp knowledge dir.
+
+    Tests never touch the real knowledge collection: the name must start with "pytest_" before anything is deleted.
+    """
+    import uuid
+
+    from app.config import get_settings
+    from app.rag.store import get_client
+
+    name = f"pytest_{uuid.uuid4().hex[:8]}"
+    knowledge_dir = tmp_path / "knowledge"
+    knowledge_dir.mkdir()
+    monkeypatch.setenv("CHROMA_COLLECTION", name)
+    monkeypatch.setenv("KNOWLEDGE_DIR", str(knowledge_dir))
+    get_settings.cache_clear()
+    assert get_settings().chroma_collection.startswith("pytest_")
+    try:
+        yield name
+    finally:
+        assert name.startswith("pytest_"), "refusing to delete a non-test collection"
+        try:
+            get_client().delete_collection(name)
+        except Exception:
+            pass  # never created
+        monkeypatch.undo()
+        get_settings.cache_clear()

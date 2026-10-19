@@ -15,5 +15,9 @@ node_modules/
 next-env.d.ts
 *.tsbuildinfo
 
+# Knowledge-base PDFs are supplied locally and not committed
+knowledge/*
+!knowledge/.gitkeep
+
 # OS / editor
 .DS_Store

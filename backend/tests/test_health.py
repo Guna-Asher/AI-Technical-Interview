@@ -46,3 +46,30 @@ def test_settings_parse_origins_and_blank_openrouter(monkeypatch: pytest.MonkeyP
 
     assert settings.cors_origins == ["http://a.test", "http://b.test"]
     assert settings.openrouter_api_key is None
+
+
+def test_rag_settings_defaults_are_operational_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@postgres:5432/db")
+    for name in ("CHUNK_SIZE", "CHUNK_OVERLAP", "KNOWLEDGE_DIR", "CHROMA_COLLECTION", "RETRIEVAL_TOP_K"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings()
+
+    assert (settings.chunk_size, settings.chunk_overlap) == (800, 150)
+    assert settings.knowledge_dir == "/knowledge"
+    assert settings.chroma_collection == "knowledge"
+    assert settings.embedding_model == "all-MiniLM-L6-v2"
+
+
+@pytest.mark.parametrize(
+    "size, overlap, top_k",
+    [("0", "0", "5"), ("100", "100", "5"), ("100", "-1", "5"), ("100", "10", "0")],
+)
+def test_invalid_rag_settings_are_rejected(monkeypatch: pytest.MonkeyPatch, size: str, overlap: str, top_k: str) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@postgres:5432/db")
+    monkeypatch.setenv("CHUNK_SIZE", size)
+    monkeypatch.setenv("CHUNK_OVERLAP", overlap)
+    monkeypatch.setenv("RETRIEVAL_TOP_K", top_k)
+
+    with pytest.raises(ValueError):
+        Settings()
