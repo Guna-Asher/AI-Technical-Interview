@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { IconAlert, IconBook, IconCheck, IconInfo, IconMinus } from "@/components/icons";
+import { useEffect, useRef, useState } from "react";
+import { IconAlert, IconBook, IconCheck, IconChevronDown, IconInfo, IconMinus } from "@/components/icons";
 import Alert from "@/components/ui/Alert";
 import Tag from "@/components/ui/Tag";
 import type { Assessment, Question, Report } from "@/lib/types";
@@ -73,60 +73,94 @@ function SavedAnswer({ text }: { text: string }) {
   );
 }
 
+// One collapsed row per question: the summary is an index (number, topic, difficulty, assessment); the full
+// question, answer and evaluation are inside.
 function QuestionFeedback({ question, total }: { question: Question; total: number }) {
   const feedback = question.answer?.feedback ?? null;
   const assessment = feedback ? ASSESSMENT[feedback.assessment] : undefined;
   return (
-    <section className="avoid-break flex flex-col gap-5 border-t border-rule pt-8">
-      <div className="flex flex-col gap-3">
-        <h3 className="text-sm font-medium text-graphite">
-          Question {question.position} of {total}
-        </h3>
-        {(question.topic || question.difficulty) && (
-          <div className="flex flex-wrap gap-2">
-            {question.topic && <Tag tone="accent">{question.topic}</Tag>}
-            {question.difficulty && <Tag>{question.difficulty}</Tag>}
-          </div>
-        )}
-        <p className="whitespace-pre-wrap font-serif text-[1.25rem] leading-snug">{question.question_text}</p>
-      </div>
-      <SavedAnswer text={question.answer?.answer_text ?? ""} />
-      {feedback ? (
-        <div className="flex flex-col gap-4">
-          <div>
-            <Tag tone={assessment?.tone ?? "neutral"} icon={assessment?.icon}>
-              {assessment?.label ?? feedback.assessment}
-            </Tag>
-          </div>
-          <p className="max-w-prose whitespace-pre-wrap">{feedback.summary}</p>
-          <div className="flex flex-col gap-5">
-            <List title="Done well" items={feedback.strengths} level={3} icon={<IconCheck className="size-4 text-moss" />} />
-            <List title="Missing or inaccurate" items={feedback.gaps} level={3} icon={<IconAlert className="size-4 text-amber" />} />
-            <List title="How to improve" items={feedback.suggestions} level={3} icon={<IconInfo className="size-4 text-cobalt" />} />
-          </div>
-          {feedback.grounded ? (
-            <p className="flex items-start gap-2 text-sm text-graphite">
-              <IconBook className="mt-0.5 size-4" />
-              <span>{`Based on: ${feedback.source_chunks.map((s) => `${s.source_title}, page ${s.page}`).join("; ")}`}</span>
-            </p>
-          ) : (
-            <p className="flex items-start gap-2 text-sm font-medium text-amber">
-              <IconAlert className="mt-0.5 size-4" />
-              <span>Evaluated without reference passages.</span>
-            </p>
+    <details data-feedback className="group avoid-break rounded-xl border border-rule bg-paper">
+      <summary className="flex min-h-11 cursor-pointer items-start gap-3 px-4 py-3 sm:px-5 sm:py-4">
+        <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <span className="text-sm font-medium text-graphite">
+            Question {question.position} of {total}
+          </span>
+          {/* The topic is the row's title; without one, the question itself stands in (clamped here, in full below). */}
+          <span className={`font-medium ${question.topic ? "" : "line-clamp-2"}`}>{question.topic || question.question_text}</span>
+          {(question.difficulty || feedback) && (
+            <span className="flex flex-wrap gap-2">
+              {question.difficulty && <Tag>{question.difficulty}</Tag>}
+              {feedback && (
+                <Tag tone={assessment?.tone ?? "neutral"} icon={assessment?.icon}>
+                  {assessment?.label ?? feedback.assessment}
+                </Tag>
+              )}
+            </span>
           )}
-        </div>
-      ) : (
-        <p className="text-graphite">No feedback is available for this answer.</p>
-      )}
-    </section>
+        </span>
+        <IconChevronDown className="mt-1 size-4 text-graphite transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="flex flex-col gap-5 border-t border-rule px-4 py-5 sm:px-5">
+        <p className="whitespace-pre-wrap font-serif text-[1.25rem] leading-snug">{question.question_text}</p>
+        <SavedAnswer text={question.answer?.answer_text ?? ""} />
+        {feedback ? (
+          <div className="flex flex-col gap-4">
+            <div>
+              <Tag tone={assessment?.tone ?? "neutral"} icon={assessment?.icon}>
+                {assessment?.label ?? feedback.assessment}
+              </Tag>
+            </div>
+            <p className="max-w-prose whitespace-pre-wrap">{feedback.summary}</p>
+            <div className="flex flex-col gap-5">
+              <List title="Done well" items={feedback.strengths} level={3} icon={<IconCheck className="size-4 text-moss" />} />
+              <List title="Missing or inaccurate" items={feedback.gaps} level={3} icon={<IconAlert className="size-4 text-amber" />} />
+              <List title="How to improve" items={feedback.suggestions} level={3} icon={<IconInfo className="size-4 text-cobalt" />} />
+            </div>
+            {feedback.grounded ? (
+              <p className="flex items-start gap-2 text-sm text-graphite">
+                <IconBook className="mt-0.5 size-4" />
+                <span>{`Based on: ${feedback.source_chunks.map((s) => `${s.source_title}, page ${s.page}`).join("; ")}`}</span>
+              </p>
+            ) : (
+              <p className="flex items-start gap-2 text-sm font-medium text-amber">
+                <IconAlert className="mt-0.5 size-4" />
+                <span>Evaluated without reference passages.</span>
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className="text-graphite">No feedback is available for this answer.</p>
+        )}
+      </div>
+    </details>
   );
 }
 
 export default function ReportView({ report }: { report: Report }) {
   const total = report.questions.length;
+  const article = useRef<HTMLElement>(null);
+
+  // Collapsed feedback would be missing from a printed report, so open it while printing and restore it afterwards.
+  useEffect(() => {
+    let opened: HTMLDetailsElement[] = [];
+    const openAll = () => {
+      opened = [...(article.current?.querySelectorAll<HTMLDetailsElement>("details[data-feedback]") ?? [])].filter((d) => !d.open);
+      opened.forEach((d) => (d.open = true));
+    };
+    const restore = () => {
+      opened.forEach((d) => (d.open = false));
+      opened = [];
+    };
+    window.addEventListener("beforeprint", openAll);
+    window.addEventListener("afterprint", restore);
+    return () => {
+      window.removeEventListener("beforeprint", openAll);
+      window.removeEventListener("afterprint", restore);
+    };
+  }, []);
+
   return (
-    <article className="flex flex-col gap-8">
+    <article ref={article} className="flex flex-col gap-8">
       <header className="flex flex-col gap-2">
         <h1 className="font-serif text-4xl leading-tight">Interview report</h1>
         <p className="text-graphite">
@@ -161,11 +195,13 @@ export default function ReportView({ report }: { report: Report }) {
       </div>
       <List title="Recommendations" items={report.recommendations} ordered />
 
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-4">
         <h2 className="text-lg font-semibold">Question-by-question feedback</h2>
-        {report.questions.map((question) => (
-          <QuestionFeedback key={question.id} question={question} total={total} />
-        ))}
+        <div className="flex flex-col gap-3">
+          {report.questions.map((question) => (
+            <QuestionFeedback key={question.id} question={question} total={total} />
+          ))}
+        </div>
       </div>
 
       <Link href="/" className="no-print self-start text-cobalt underline underline-offset-4 hover:text-cobalt-deep">
