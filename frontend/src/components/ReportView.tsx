@@ -34,7 +34,7 @@ function List({
   const Heading = level === 2 ? "h2" : "h3";
   const List = ordered ? "ol" : "ul";
   return (
-    <section className="flex flex-col gap-2">
+    <section className="flex min-w-0 flex-col gap-2">
       <Heading className={level === 2 ? "text-lg font-semibold" : "flex items-center gap-2 font-medium"}>
         {icon}
         {title}
@@ -98,7 +98,7 @@ function QuestionFeedback({ question, total }: { question: Question; total: numb
               {assessment?.label ?? feedback.assessment}
             </Tag>
           </div>
-          <p className="whitespace-pre-wrap">{feedback.summary}</p>
+          <p className="max-w-prose whitespace-pre-wrap">{feedback.summary}</p>
           <div className="flex flex-col gap-5">
             <List title="Done well" items={feedback.strengths} level={3} icon={<IconCheck className="size-4 text-moss" />} />
             <List title="Missing or inaccurate" items={feedback.gaps} level={3} icon={<IconAlert className="size-4 text-amber" />} />
@@ -152,10 +152,10 @@ export default function ReportView({ report }: { report: Report }) {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-semibold">Summary</h2>
-        <p className="whitespace-pre-wrap font-serif text-[1.1875rem] leading-[1.7]">{report.summary}</p>
+        <p className="max-w-prose whitespace-pre-wrap font-serif text-[1.1875rem] leading-[1.7]">{report.summary}</p>
       </section>
 
-      <div className="grid gap-8 md:grid-cols-2">
+      <div className="grid gap-8 lg:grid-cols-2 lg:gap-10">
         <List title="Strengths" items={report.strengths} />
         <List title="Topics to improve" items={report.improvement_topics} />
       </div>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import AnswerForm from "@/components/AnswerForm";
-import { IconBook, IconCheck } from "@/components/icons";
+import { IconBook, IconCheck, IconChevronDown } from "@/components/icons";
 import ProgressBar from "@/components/ProgressBar";
 import ReportView from "@/components/ReportView";
 import Alert from "@/components/ui/Alert";
@@ -38,6 +38,8 @@ async function fetchState(sessionId: string): Promise<State> {
 }
 
 const LINK = "text-cobalt underline underline-offset-4 hover:text-cobalt-deep";
+// The page container is wider for the report; every other state keeps the narrower reading column.
+const COLUMN = "mx-auto w-full max-w-[45rem]";
 
 function errorTitle(httpStatus: number): string {
   if (httpStatus === 404) return "We could not find this interview";
@@ -56,8 +58,34 @@ function Sources({ question }: { question: Question }) {
   );
 }
 
+/** Shown right after an answer is saved; the next question stays hidden until the candidate continues. */
+function SavedConfirmation({ position, onContinue }: { position: number; onContinue: () => void }) {
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    button.current?.focus();
+  }, []);
+  return (
+    <section className="flex flex-col gap-4 rounded-xl border border-moss/30 bg-moss-tint p-5 sm:p-7">
+      <div role="status" className="flex flex-col gap-1">
+        <p className="flex items-center gap-2 text-lg font-semibold text-moss">
+          <IconCheck className="size-5" />
+          <span>Answer saved</span>
+        </p>
+        <p className="text-graphite">Your answer to question {position} is saved and kept if you refresh.</p>
+      </div>
+      <Button ref={button} onClick={onContinue} className="w-full sm:w-auto sm:self-start">
+        Continue to next question
+      </Button>
+    </section>
+  );
+}
+
 export default function InterviewView({ sessionId }: { sessionId: string }) {
   const [state, setState] = useState<State>({ status: "loading" });
+  // Id of the question whose answer was just saved in this browser. Transient: a refresh discards it.
+  const [justSaved, setJustSaved] = useState<string | null>(null);
+  const questionHeading = useRef<HTMLHeadingElement>(null);
+  const focusQuestion = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -68,11 +96,23 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     let active = true;
-    fetchState(sessionId).then((next) => active && setState(next));
+    fetchState(sessionId).then((next) => {
+      if (!active) return;
+      setState(next);
+      setJustSaved(null); // a confirmation never carries over from another session
+    });
     return () => {
       active = false;
     };
   }, [sessionId]);
+
+  // After Continue, move focus to the question that has just been revealed.
+  useEffect(() => {
+    if (justSaved === null && focusQuestion.current) {
+      focusQuestion.current = false;
+      questionHeading.current?.focus();
+    }
+  }, [justSaved]);
 
   async function reload() {
     setState(await fetchState(sessionId));
@@ -131,8 +171,14 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
     }
   }
 
+  function continueToNext() {
+    focusQuestion.current = true;
+    setJustSaved(null);
+  }
+
   function answerSaved(questionId: string, answer: Answer) {
     setNotice(null);
+    setJustSaved(questionId);
     setState((s) =>
       s.status === "ready"
         ? { ...s, questions: s.questions.map((q) => (q.id === questionId ? { ...q, answer } : q)) }
@@ -147,7 +193,7 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   if (state.status === "loading") {
     return (
-      <div role="status" className="flex items-center gap-3 text-graphite">
+      <div role="status" className={`${COLUMN} flex items-center gap-3 text-graphite`}>
         <Spinner />
         <span>Loading your interview…</span>
       </div>
@@ -157,7 +203,7 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   if (state.status === "error") {
     const canRetry = state.httpStatus === 0 || state.httpStatus >= 500;
     return (
-      <div className="flex flex-col items-start gap-5">
+      <div className={`${COLUMN} flex flex-col items-start gap-5`}>
         <h1 className="text-2xl font-semibold">{errorTitle(state.httpStatus)}</h1>
         <Alert tone="error" className="w-full">
           {state.message}
@@ -178,7 +224,7 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   if (interview.status === "completed") {
     return (
-      <div className="flex flex-col items-start gap-5">
+      <div className={`${COLUMN} flex flex-col items-start gap-5`}>
         <h1 className="text-2xl font-semibold">The report could not be loaded</h1>
         <Alert tone="error" className="w-full">
           {state.reportError ?? "The report could not be loaded."}
@@ -190,7 +236,7 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
 
   if (!interview.candidate_profile) {
     return (
-      <div className="flex flex-col items-start gap-4">
+      <div className={`${COLUMN} flex flex-col items-start gap-4`}>
         <h1 className="text-2xl font-semibold">Your interview</h1>
         <p>No resume has been processed for this interview.</p>
         <p className="text-graphite">Start a new interview and upload your resume to continue.</p>
@@ -213,7 +259,7 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   if (questions.length === 0) {
     const profile = interview.candidate_profile;
     return (
-      <div className="flex flex-col gap-8">
+      <div className={`${COLUMN} flex flex-col gap-8`}>
         {header}
         <section className="flex flex-col gap-4 rounded-xl border border-rule bg-paper p-5 sm:p-7">
           <h2 className="text-lg font-semibold">What we read from your resume</h2>
@@ -256,13 +302,20 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
   const answered = questions.filter((q) => q.answer).length;
   const current = questions.find((q) => !q.answer) ?? null;
   const submitted = questions.filter((q) => q.answer);
+  // Only while another question remains, and only for an answer that belongs to this session's data.
+  const saved = justSaved ? questions.find((q) => q.id === justSaved && q.answer) : undefined;
+  const confirming = saved !== undefined && current !== null;
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className={`${COLUMN} flex flex-col gap-8`}>
       {header}
       <div className="flex flex-col gap-3">
         <p className="text-sm font-medium text-graphite">
-          {current ? `Question ${current.position} of ${total} · ${answered} answered` : `All ${total} questions answered`}
+          {!current
+            ? `All ${total} questions answered`
+            : confirming
+              ? `${answered} of ${total} answered`
+              : `Question ${current.position} of ${total} · ${answered} answered`}
         </p>
         <ProgressBar answered={answered} total={total} />
       </div>
@@ -297,23 +350,9 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
         </section>
       )}
 
-      {submitted.length > 0 && (
-        <div className="flex flex-col gap-5">
-          {submitted.map((q) => (
-            <section key={q.id} className="flex flex-col gap-3 border-t border-rule pt-5">
-              <div className="flex flex-col items-start gap-2 sm:flex-row sm:justify-between sm:gap-4">
-                <p className="font-serif text-lg leading-snug">{q.question_text}</p>
-                <Tag tone="success" icon={<IconCheck className="size-3.5" />}>
-                  Submitted
-                </Tag>
-              </div>
-              <p className="whitespace-pre-wrap text-graphite">{q.answer?.answer_text}</p>
-            </section>
-          ))}
-        </div>
-      )}
+      {confirming && <SavedConfirmation position={saved.position} onContinue={continueToNext} />}
 
-      {current && (
+      {current && !confirming && (
         <section className="flex flex-col gap-5 rounded-xl border border-rule bg-paper p-5 shadow-[0_1px_2px_rgb(21_26_34/0.06)] sm:p-7">
           <div className="flex flex-col gap-4">
             {(current.topic || current.difficulty) && (
@@ -322,7 +361,13 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
                 {current.difficulty && <Tag>{current.difficulty}</Tag>}
               </div>
             )}
-            <h2 className="whitespace-pre-wrap font-serif text-[1.5rem] leading-snug [text-wrap:pretty] sm:text-[1.75rem]">{current.question_text}</h2>
+            <h2
+              ref={questionHeading}
+              tabIndex={-1}
+              className="whitespace-pre-wrap font-serif text-[1.5rem] leading-snug [text-wrap:pretty] sm:text-[1.75rem]"
+            >
+              {current.question_text}
+            </h2>
             <Sources question={current} />
           </div>
           <AnswerForm
@@ -333,6 +378,24 @@ export default function InterviewView({ sessionId }: { sessionId: string }) {
             onAlreadyAnswered={alreadyAnswered}
           />
         </section>
+      )}
+
+      {submitted.length > 0 && (
+        <details className="group rounded-xl border border-rule bg-paper">
+          <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-4 py-2 font-medium sm:px-5">
+            Previous answers ({submitted.length})
+            <IconChevronDown className="size-4 text-graphite transition-transform group-open:rotate-180" />
+          </summary>
+          <ol className="flex flex-col gap-6 border-t border-rule px-4 py-5 sm:px-5">
+            {submitted.map((q) => (
+              <li key={q.id} className="flex flex-col gap-2">
+                <p className="text-sm font-medium text-graphite">Question {q.position}</p>
+                <p className="font-serif text-lg leading-snug">{q.question_text}</p>
+                <p className="whitespace-pre-wrap text-graphite">{q.answer?.answer_text}</p>
+              </li>
+            ))}
+          </ol>
+        </details>
       )}
     </div>
   );

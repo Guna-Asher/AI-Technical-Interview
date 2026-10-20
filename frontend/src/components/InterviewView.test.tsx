@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FakeBackend, REPORT_CONTENT, makeAnswer, makeFeedback, makeQuestion } from "@/test-utils/fakeBackend";
@@ -16,6 +16,10 @@ const renderView = () => render(<InterviewView sessionId="session-1" />);
 const generateCalls = () => backend.calls.filter((c) => c.method === "POST" && c.path.endsWith("/questions")).length;
 const answerCalls = () => backend.calls.filter((c) => c.path.endsWith("/answer"));
 const three = () => [makeQuestion(1), makeQuestion(2), makeQuestion(3)];
+const CONTINUE = { name: "Continue to next question" };
+const SAVED = "Answer saved";
+const historyToggle = (count: number) => screen.getByText(`Previous answers (${count})`);
+const completeOrReportCalls = () => backend.calls.filter((c) => c.path.endsWith("/complete") || c.path.endsWith("/report")).length;
 
 describe("loading and error states", () => {
   it("shows a loading state, then the interview", async () => {
@@ -185,25 +189,25 @@ describe("questions and progress", () => {
     expect(bar).toHaveAttribute("aria-valuemax", "3");
   });
 
-  it("recovers saved progress after a refresh: answered questions show as submitted, the first unanswered is current", async () => {
+  it("recovers saved progress after a refresh: the first unanswered question is current and saved answers sit in a collapsed history", async () => {
     const [q1, q2, q3] = three();
     backend.seed({}, [{ ...q1, answer: makeAnswer(q1, "my saved answer one") }, q2, q3]);
     const first = renderView();
-    await screen.findByText("my saved answer one");
+    await screen.findByText("Previous answers (1)");
     first.unmount();
 
     renderView(); // refresh: everything is read from the backend again
 
-    expect(await screen.findByText("my saved answer one")).toBeInTheDocument();
-    expect(screen.getByText("Submitted")).toBeInTheDocument();
-    expect(screen.getByText("Synthetic question number 1?")).toBeInTheDocument();
-    expect(screen.getByText("Synthetic question number 2?")).toBeInTheDocument();
+    expect(await screen.findByText("Previous answers (1)")).toBeInTheDocument();
+    expect(screen.getByText("Synthetic question number 2?")).toBeVisible();
+    expect(screen.getByText("my saved answer one")).not.toBeVisible();
     expect(screen.getAllByLabelText("Your answer")).toHaveLength(1); // only the current question asks for an answer
     expect(screen.queryByText("Synthetic question number 3?")).toBeNull();
+    expect(screen.queryByText(SAVED)).toBeNull();
     expect(backend.calls.every((c) => c.method === "GET")).toBe(true);
   });
 
-  it("shows a completion panel with the saved answers once everything is answered", async () => {
+  it("shows a completion panel, with the saved answers in a collapsed history, once everything is answered", async () => {
     const answered = three().map((q) => ({ ...q, answer: makeAnswer(q, `saved answer ${q.position}`) }));
     backend.seed({}, answered);
     renderView();
@@ -211,10 +215,51 @@ describe("questions and progress", () => {
     expect(await screen.findByText("All 3 answers are saved.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Finish interview and get my report" })).toBeEnabled();
     expect(screen.queryByText(/not available yet/)).toBeNull();
-    expect(screen.getAllByText("Submitted")).toHaveLength(3);
-    expect(screen.getByText("saved answer 3")).toBeInTheDocument();
+    expect(screen.getByText("Previous answers (3)")).toBeInTheDocument();
+    expect(screen.getByText("saved answer 3")).not.toBeVisible();
     expect(screen.queryByLabelText("Your answer")).toBeNull();
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
     expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "3");
+  });
+});
+
+describe("previous answers", () => {
+  it("is omitted when nothing has been answered", async () => {
+    backend.seed({}, three());
+    renderView();
+    await screen.findByLabelText("Your answer");
+
+    expect(screen.queryByText(/Previous answers/)).toBeNull();
+  });
+
+  it("is collapsed by default, opens on request, and lists the saved answers in question order", async () => {
+    const user = userEvent.setup();
+    const [q1, q2, q3] = three();
+    backend.seed({}, [{ ...q1, answer: makeAnswer(q1, "first saved answer") }, { ...q2, answer: makeAnswer(q2, "second saved answer") }, q3]);
+    renderView();
+    await screen.findByLabelText("Your answer");
+    expect(screen.getByText("first saved answer")).not.toBeVisible();
+
+    await user.click(historyToggle(2));
+
+    const items = screen.getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("Synthetic question number 1?");
+    expect(items[0]).toHaveTextContent("first saved answer");
+    expect(items[1]).toHaveTextContent("Synthetic question number 2?");
+    expect(items[1]).toHaveTextContent("second saved answer");
+    expect(screen.getByText("first saved answer")).toBeVisible();
+    expect(screen.queryByText("Submitted")).toBeNull(); // the history itself says these were submitted
+  });
+
+  it("renders saved answers as plain text, never as HTML", async () => {
+    const hostile = "<img src=x onerror=alert(1)> my answer";
+    const q1 = makeQuestion(1);
+    backend.seed({}, [{ ...q1, answer: makeAnswer(q1, hostile) }, makeQuestion(2)]);
+    const { container } = renderView();
+
+    expect(await screen.findByText(hostile)).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
   });
 });
 
@@ -227,7 +272,7 @@ describe("submitting answers", () => {
     return user;
   }
 
-  it("saves through the backend, marks the answer submitted only afterwards, and moves to the next question", async () => {
+  it("saves through the backend, confirms only afterwards, and keeps the next question hidden until Continue", async () => {
     const user = await ready();
     const release = backend.hold("/answer");
     await user.type(screen.getByLabelText("Your answer"), "  my typed answer  ");
@@ -236,16 +281,90 @@ describe("submitting answers", () => {
 
     expect(await screen.findByRole("button", { name: "Saving…" })).toBeDisabled();
     expect(screen.getByLabelText("Your answer")).toBeDisabled();
-    expect(screen.queryByText("Submitted")).toBeNull(); // not marked until the backend confirms
+    expect(screen.queryByText(SAVED)).toBeNull(); // not confirmed until the backend confirms
     release();
-    expect(await screen.findByText("Submitted")).toBeInTheDocument();
+    expect(await screen.findByText(SAVED)).toBeInTheDocument();
     expect(answerCalls()).toEqual([
       { method: "POST", path: "/api/interviews/session-1/questions/q1/answer", body: { answer_text: "  my typed answer  " } },
     ]);
-    expect(screen.getByText("my typed answer")).toBeInTheDocument(); // the saved (trimmed) text from the backend
-    expect(screen.getByText("Synthetic question number 2?")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(SAVED);
+    expect(screen.getByRole("button", CONTINUE)).toHaveFocus();
+    expect(screen.queryByLabelText("Your answer")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Submit answer" })).toBeNull();
+    expect(screen.queryByText("Synthetic question number 2?")).toBeNull(); // hidden until Continue
+    expect(screen.getByText("1 of 3 answered")).toBeInTheDocument(); // the next question is not labelled active
+    expect(screen.queryByText(/Question 2 of 3/)).toBeNull();
+    expect(screen.getByText("my typed answer")).not.toBeVisible(); // the saved (trimmed) text from the backend, in the history
+  });
+
+  it("reveals the next question on Continue, with an empty field, updated progress and no network request", async () => {
+    const user = await ready();
+    await user.type(screen.getByLabelText("Your answer"), "first answer");
+    await user.click(screen.getByRole("button", { name: "Submit answer" }));
+    await user.click(await screen.findByRole("button", CONTINUE));
+    const requestsAfterSave = backend.calls.length;
+
+    expect(screen.getByText("Synthetic question number 2?")).toBeVisible();
     expect(screen.getByLabelText("Your answer")).toHaveValue("");
     expect(screen.getByText(/Question 2 of 3 · 1 answered/)).toBeInTheDocument();
+    expect(screen.queryByText(SAVED)).toBeNull();
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
+    expect(screen.getByRole("heading", { name: "Synthetic question number 2?" })).toHaveFocus();
+    expect(backend.calls).toHaveLength(requestsAfterSave);
+    expect(backend.calls.filter((c) => c.method === "POST")).toHaveLength(1); // only the answer itself
+  });
+
+  it("sends no further request from repeated clicks or the keyboard shortcut while the confirmation is shown", async () => {
+    const user = await ready();
+    await user.type(screen.getByLabelText("Your answer"), "an answer");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    const continueButton = await screen.findByRole("button", CONTINUE);
+
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    const requestsBefore = backend.calls.length;
+    fireEvent.click(continueButton);
+    fireEvent.click(continueButton);
+
+    expect(answerCalls()).toHaveLength(1);
+    expect(backend.calls.length).toBe(requestsBefore);
+  });
+
+  it("returns to the first unanswered question, with only GET requests, when refreshed during the confirmation", async () => {
+    const user = await ready();
+    await user.type(screen.getByLabelText("Your answer"), "saved before refresh");
+    await user.click(screen.getByRole("button", { name: "Submit answer" }));
+    await screen.findByText(SAVED);
+    backend.calls = [];
+    cleanup(); // a browser refresh discards component state
+
+    renderView();
+
+    expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
+    expect(screen.getByText("Synthetic question number 2?")).toBeVisible();
+    expect(screen.queryByText(SAVED)).toBeNull();
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
+    expect(backend.calls.length).toBeGreaterThan(0);
+    expect(backend.calls.every((c) => c.method === "GET")).toBe(true);
+  });
+
+  it("never shows a confirmation for an answer that belongs to another session", async () => {
+    const user = userEvent.setup();
+    backend.seed({}, three());
+    const view = renderView();
+    await screen.findByLabelText("Your answer");
+    await user.type(screen.getByLabelText("Your answer"), "answer in session one");
+    await user.click(screen.getByRole("button", { name: "Submit answer" }));
+    await screen.findByText(SAVED);
+    // The second session reuses the same question ids, so only clearing the confirmation can hide it.
+    const [q1, q2] = [makeQuestion(1), makeQuestion(2)];
+    backend.seed({ id: "session-2" }, [{ ...q1, answer: makeAnswer(q1, "session two answer") }, q2]);
+
+    view.rerender(<InterviewView sessionId="session-2" />);
+
+    await waitFor(() => expect(screen.queryByText(SAVED)).toBeNull());
+    expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
+    expect(screen.getByText("Synthetic question number 2?")).toBeVisible();
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
   });
 
   it("sends only one request when the form is submitted repeatedly", async () => {
@@ -258,7 +377,7 @@ describe("submitting answers", () => {
     fireEvent.submit(form);
     release();
 
-    await screen.findByText("Submitted");
+    await screen.findByText(SAVED);
     expect(answerCalls()).toHaveLength(1);
   });
 
@@ -281,10 +400,13 @@ describe("submitting answers", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("The answer could not be saved.");
     expect(screen.getByLabelText("Your answer")).toHaveValue("do not lose this");
-    expect(screen.queryByText("Submitted")).toBeNull();
+    expect(screen.queryByText(SAVED)).toBeNull(); // no false success
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
+    expect(screen.getByText("Synthetic question number 1?")).toBeVisible(); // the same question stays active
+    expect(screen.queryByText("Synthetic question number 2?")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Submit answer" }));
-    expect(await screen.findByText("Submitted")).toBeInTheDocument();
+    expect(await screen.findByText(SAVED)).toBeInTheDocument();
     expect(answerCalls()).toHaveLength(2);
   });
 
@@ -297,6 +419,8 @@ describe("submitting answers", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("Cannot reach the server");
     expect(screen.getByLabelText("Your answer")).toHaveValue("still here");
+    expect(screen.queryByText(SAVED)).toBeNull();
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
   });
 
   it("shows the already-saved answer when the backend reports a conflict", async () => {
@@ -306,28 +430,54 @@ describe("submitting answers", () => {
 
     await user.click(screen.getByRole("button", { name: "Submit answer" }));
 
-    expect(await screen.findByText("saved from another tab")).toBeInTheDocument();
+    expect(await screen.findByText("Synthetic question number 2?")).toBeVisible();
+    expect(screen.getByText("saved from another tab")).not.toBeVisible(); // recovered from the backend, in the collapsed history
     expect(screen.queryByText("typed too late")).toBeNull();
     expect(screen.getByText(/already answered/)).toBeInTheDocument();
-    expect(screen.getByText("Synthetic question number 2?")).toBeInTheDocument();
+    expect(screen.queryByText(SAVED)).toBeNull(); // this browser did not save it, so no false success
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull();
+    expect(answerCalls()).toHaveLength(1);
   });
 
-  it("can answer every question in turn and reach the completion panel", async () => {
+  it("can answer every question in turn, continuing between answers, and reach the completion panel", async () => {
     const user = await ready();
 
-    for (const n of [1, 2, 3]) {
+    for (const n of [1, 2]) {
       await user.type(screen.getByLabelText("Your answer"), `answer ${n}`);
       await user.click(screen.getByRole("button", { name: "Submit answer" }));
-      await waitFor(() => expect(screen.getByText(`answer ${n}`)).toBeInTheDocument());
+      await user.click(await screen.findByRole("button", CONTINUE));
     }
+    await user.type(screen.getByLabelText("Your answer"), "answer 3");
+    await user.click(screen.getByRole("button", { name: "Submit answer" }));
 
     expect(await screen.findByText("All 3 answers are saved.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", CONTINUE)).toBeNull(); // no extra step after the final answer
+    expect(screen.getByRole("button", { name: "Finish interview and get my report" })).toBeEnabled();
     expect(within(screen.getByRole("progressbar")).queryByText(/./)).toBeNull();
     expect(answerCalls().map((c) => c.path)).toEqual([
       "/api/interviews/session-1/questions/q1/answer",
       "/api/interviews/session-1/questions/q2/answer",
       "/api/interviews/session-1/questions/q3/answer",
     ]);
+  });
+
+  it("does not evaluate or fetch a report after the final answer, and only does so when Finish is clicked", async () => {
+    const user = userEvent.setup();
+    backend.seed({}, [makeQuestion(1)]);
+    renderView();
+    await user.type(await screen.findByLabelText("Your answer"), "the only answer");
+
+    await user.click(screen.getByRole("button", { name: "Submit answer" }));
+
+    const finish = await screen.findByRole("button", { name: "Finish interview and get my report" });
+    expect(screen.queryByText(SAVED)).toBeNull();
+    expect(completeOrReportCalls()).toBe(0);
+    expect(screen.queryByRole("heading", { name: "Interview report" })).toBeNull();
+
+    await user.click(finish);
+
+    expect(await screen.findByRole("heading", { name: "Interview report" })).toBeInTheDocument();
+    expect(backend.calls.filter((c) => c.path.endsWith("/complete"))).toHaveLength(1);
   });
 });
 
@@ -380,7 +530,7 @@ describe("finishing the interview and the results", () => {
 
     expect(await screen.findByText(/Evaluating your answers and writing your report/)).toBeInTheDocument();
     expect(screen.getByRole("button", FINISH)).toBeDisabled();
-    expect(screen.getByText("saved answer 2")).toBeInTheDocument(); // saved answers stay visible while processing
+    expect(screen.getByText("Previous answers (3)")).toBeInTheDocument(); // saved answers stay available while processing
     release();
 
     expect(await screen.findByRole("heading", { name: "Interview report" })).toBeInTheDocument();
@@ -474,7 +624,7 @@ describe("answer form keyboard and progress indicator", () => {
 
     await user.keyboard(keys);
 
-    expect(await screen.findByText("Submitted")).toBeInTheDocument();
+    expect(await screen.findByText(SAVED)).toBeInTheDocument();
     expect(backend.calls.filter((c) => c.path.endsWith("/answer"))).toHaveLength(1);
   });
 

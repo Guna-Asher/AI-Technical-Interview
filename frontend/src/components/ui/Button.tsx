@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from "react";
+import type { ComponentProps } from "react";
 import { Spinner } from "@/components/ui/Spinner";
 
 type Variant = "primary" | "secondary" | "quiet";
@@ -9,7 +9,7 @@ const VARIANT: Record<Variant, string> = {
   quiet: "px-3 text-cobalt hover:bg-cobalt-tint",
 };
 
-interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
+interface Props extends ComponentProps<"button"> {
   variant?: Variant;
   /** Shows a spinner. The caller also sets `disabled` and the label text. */
   loading?: boolean;

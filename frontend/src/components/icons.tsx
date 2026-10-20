@@ -24,6 +24,12 @@ export const IconCheck = (p: IconProps) => (
     <path d="m4.5 10.5 3.5 3.5 7.5-8" />
   </Svg>
 );
+export const IconChevronDown = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m5 8 5 5 5-5" />
+  </Svg>
+);
+
 export const IconAlert = (p: IconProps) => (
   <Svg {...p}>
     <path d="M10 3.5 2.5 16.5h15z" />
