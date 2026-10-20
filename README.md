@@ -66,8 +66,8 @@ Everything runs in Docker. You do not need Node.js, Python, PostgreSQL or Chroma
 ### 2. Clone the repository
 
 ```bash
-git clone <repository-url>
-cd <repository-folder>
+git clone https://github.com/Guna-Asher/AI-Technical-Interview.git
+cd AI-Technical-Interview
 ```
 
 ### 3. Configure
