@@ -8,9 +8,7 @@ This is a portfolio and internship project. It is not a production hiring tool, 
 
 ## Demo
 
-> **TODO:** add the end-to-end demo video link here before submission.
->
-> Demo video: `<paste URL here>`
+> Demo video: `https://drive.google.com/file/d/1ZVepw4ARdc6yzr8RSgv-or1npTVEw_Oq/view?usp=sharing`
 
 ## Features
 
