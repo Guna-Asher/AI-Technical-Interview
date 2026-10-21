@@ -8,7 +8,9 @@ This is a portfolio and internship project. It is not a production hiring tool, 
 
 ## Demo
 
-> Demo video: `https://drive.google.com/file/d/1ZVepw4ARdc6yzr8RSgv-or1npTVEw_Oq/view?usp=sharing`
+Watch the project walkthrough to see resume upload, AI-generated interview questions, answering questions, and the final feedback report.
+
+**[▶ Watch the AI Technical Interview Demo](https://drive.google.com/file/d/1ZVepw4ARdc6yzr8RSgv-or1npTVEw_Oq/view?usp=drive_link)**
 
 ## Features
 
